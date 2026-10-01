@@ -47,6 +47,20 @@ describe('WhatsApp Web (linked phone)', () => {
     expect(s.number).toBe('919000000001');
   });
 
+  it('replaces an expired QR code with a fresh one when it is requested', async () => {
+    const { s, fake } = session();
+    await s.start();
+    fake.emit('qr', 'first');
+    for (let i = 0; i < 40 && !s.qr; i++) await new Promise((r) => setTimeout(r, 50));
+    expect(s.currentQr()).toMatch(/^data:image\/png;base64,/);
+    const restart = jest.spyOn(s, 'restart').mockResolvedValue();
+    (s as any).qrAt = Date.now() - 60_000; // WhatsApp stopped rotating the code
+    expect(s.currentQr()).toBeNull();
+    expect(s.currentQr()).toBeNull();
+    await new Promise((r) => setImmediate(r));
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses to send before linking, with a clear message and no retry', async () => {
     const { s } = session();
     const err = await new WhatsAppWebProvider(s)

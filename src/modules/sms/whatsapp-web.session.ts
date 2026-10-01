@@ -4,6 +4,9 @@ import { toDataURL } from 'qrcode';
 import { AppConfig } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
+/** Older than this, a QR code can no longer be scanned. */
+const QR_STALE_MS = 45_000;
+
 export type WebSessionState = 'off' | 'starting' | 'qr' | 'ready' | 'disconnected' | 'failed';
 
 /** The parts of whatsapp-web.js the app uses (lets tests use a fake). */
@@ -36,6 +39,8 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
   /** Latest QR to scan, as a PNG data URL (only while state is "qr"). */
   qr: string | null = null;
   lastError: string | null = null;
+  /** When the current QR was issued (WhatsApp rotates it every ~20 s, then stops after a few minutes). */
+  private qrAt = 0;
   private lastSendAt = 0;
   private sendChain: Promise<unknown> = Promise.resolve();
   private restartTimer?: NodeJS.Timeout;
@@ -82,6 +87,7 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
       this.client = client;
       client.on('qr', async (qr: string) => {
         this.state = 'qr';
+        this.qrAt = Date.now();
         this.qr = await toDataURL(qr, { margin: 1, width: 320 });
         this.logger.log('Scan the QR code in Admin → Settings → WhatsApp & notifications to link the phone.');
       });
@@ -112,6 +118,26 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`WhatsApp Web could not start: ${this.lastError}`);
     }
   }
+
+  /**
+   * The QR to show right now. WhatsApp Web stops issuing new codes after a few
+   * minutes without a scan, leaving an expired one; when someone is looking
+   * and the code is stale, start over to get a fresh code.
+   */
+  currentQr() {
+    if (this.state !== 'qr') return null;
+    if (Date.now() - this.qrAt > QR_STALE_MS) {
+      if (!this.refreshing) {
+        this.refreshing = true;
+        this.logger.log('QR code expired — getting a fresh one.');
+        void this.restart().finally(() => (this.refreshing = false));
+      }
+      return null; // never show a code that can't be scanned
+    }
+    return this.qr;
+  }
+
+  private refreshing = false;
 
   async restart() {
     await this.client?.destroy().catch(() => undefined);

@@ -113,7 +113,7 @@ export class WhatsAppWebController {
     return {
       enabled: this.web.enabled,
       state: this.web.enabled ? this.web.state : 'off',
-      qr: this.web.state === 'qr' ? this.web.qr : null,
+      qr: this.web.currentQr(),
       number: this.web.state === 'ready' ? this.web.number : null,
       error: this.web.lastError,
     };
