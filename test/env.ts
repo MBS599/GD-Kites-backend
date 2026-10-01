@@ -11,6 +11,7 @@ process.env.ALLOW_DEV_LOGIN = 'true';
 process.env.GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'test-client.apps.googleusercontent.com';
 // Never talk to real gateways from tests, whatever the local .env says.
 process.env.MESSAGING_PROVIDER = 'log';
+process.env.MESSAGING_ALLOWLIST = ''; // a dev allowlist in .env would skip the test numbers
 process.env.FIREBASE_SERVICE_ACCOUNT = '';
 process.env.WHATSAPP_APP_SECRET = 'test-app-secret';
 process.env.WHATSAPP_VERIFY_TOKEN = 'test-verify-token';

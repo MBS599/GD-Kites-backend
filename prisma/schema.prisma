@@ -103,6 +103,10 @@ model AppSettings {
   id                 Int      @id @default(1)
   /// Upper bound for a service area's radius (the admin slider's max).
   maxServiceRadiusKm Float    @default(100)
+  /// Delivery planning: orders join a group within this distance (km) of its first order.
+  dispatchRadiusKm   Float    @default(4)
+  /// Delivery planning: most orders suggested for one driver.
+  dispatchMaxOrders  Int      @default(8)
   updatedAt          DateTime @updatedAt
 }
 

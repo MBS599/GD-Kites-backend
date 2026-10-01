@@ -1,21 +1,22 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsInt, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { CurrentUser, Roles, type AuthUser } from '../../common/auth.decorators';
+import { SettingsService } from '../settings/settings.controller';
 import { DispatchService } from './dispatch.service';
 
 export class DispatchQuery {
   @IsOptional() @IsUUID() serviceAreaId?: string;
-  /** Most orders suggested for one driver (default 8). */
-  @IsOptional() @Type(() => Number) @IsNumber() @Min(1) @Max(30) maxPerDriver?: number;
-  /** Orders join a group only within this many km of its first order (default 4). */
-  @IsOptional() @Type(() => Number) @IsNumber() @Min(0.5) @Max(50) radiusKm?: number;
+  /** Most orders suggested for one driver (default: admin setting). */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) maxPerDriver?: number;
+  /** Orders join a group only within this many km of its first order (default: admin setting). */
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0.5) @Max(1000) radiusKm?: number;
 }
 
 export class AssignGroupDto {
   @IsUUID() driverId: string;
-  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(50) @IsUUID('all', { each: true }) orderIds: string[];
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(100) @IsUUID('all', { each: true }) orderIds: string[];
 }
 
 @ApiTags('Dispatch')
@@ -23,12 +24,18 @@ export class AssignGroupDto {
 @Roles('ADMIN')
 @Controller()
 export class DispatchController {
-  constructor(private readonly dispatch: DispatchService) {}
+  constructor(
+    private readonly dispatch: DispatchService,
+    private readonly settings: SettingsService,
+  ) {}
 
   /** Confirmed orders grouped around the oldest order, with a suggested driver and route per group. */
   @Get('dispatch/plan')
-  plan(@Query() q: DispatchQuery) {
-    return this.dispatch.plan({ serviceAreaId: q.serviceAreaId, maxPerDriver: q.maxPerDriver ?? 8, radiusKm: q.radiusKm ?? 4 });
+  async plan(@Query() q: DispatchQuery) {
+    const s = await this.settings.get();
+    const maxPerDriver = q.maxPerDriver ?? s.dispatchMaxOrders;
+    const radiusKm = q.radiusKm ?? s.dispatchRadiusKm;
+    return { ...(await this.dispatch.plan({ serviceAreaId: q.serviceAreaId, maxPerDriver, radiusKm })), maxPerDriver, radiusKm };
   }
 
   /** Assign a whole group to one driver. Each order follows the normal assignment rules. */

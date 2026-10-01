@@ -526,6 +526,14 @@ describe('GD Kite Center API (e2e)', () => {
       });
       await prisma.order.update({ where: { id: katraj }, data: { placedAt: new Date(Date.now() - 3_600_000) } });
 
+      // The group radius is an admin setting: a wide one pulls Hadapsar (≈7 km) into the Katraj group.
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ dispatchRadiusKm: 20, dispatchMaxOrders: 40 }).expect(200);
+      const wide = (await http.get(`${API}/dispatch/plan`).set(auth(admin)).expect(200)).body;
+      expect(wide).toMatchObject({ radiusKm: 20, maxPerDriver: 40 });
+      const wideKatraj = wide.groups.find((g: any) => g.orders.some((o: any) => o.id === katraj));
+      expect(wideKatraj.orders.map((o: any) => o.id)).toEqual(expect.arrayContaining([katraj, hadapsar, bibwewadi, dhankawadi]));
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ dispatchRadiusKm: 4, dispatchMaxOrders: 8 }).expect(200);
+
       const plan = (await http.get(`${API}/dispatch/plan`).set(auth(admin)).query({ radiusKm: 4 }).expect(200)).body;
       const groupOf = (id: string) => plan.groups.find((g: any) => g.orders.some((o: any) => o.id === id));
       const katrajGroup = groupOf(katraj);
@@ -648,6 +656,11 @@ describe('GD Kite Center API (e2e)', () => {
       await http.post(`${API}/service-areas`).set(auth(admin)).send(body).expect(201);
       await http.patch(`${API}/settings`).set(auth(admin)).send({ maxServiceRadiusKm: 100 }).expect(200);
       await http.patch(`${API}/settings`).set(auth(admin)).send({ maxServiceRadiusKm: 5000 }).expect(400);
+      // Partial updates keep the other settings.
+      const kept = (await http.patch(`${API}/settings`).set(auth(admin)).send({ dispatchRadiusKm: 12.5 }).expect(200)).body.settings;
+      expect(kept).toMatchObject({ maxServiceRadiusKm: 100, dispatchRadiusKm: 12.5, dispatchMaxOrders: 8 });
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ dispatchMaxOrders: 0 }).expect(400);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ dispatchRadiusKm: 4 }).expect(200);
     });
 
     it('delivery charge = area rates; driver fare = the assigned driver’s vehicle/custom rates', async () => {
