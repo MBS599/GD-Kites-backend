@@ -108,7 +108,7 @@ export class WhatsAppWebProvider implements SmsProvider {
 
   async send(req: SmsRequest) {
     try {
-      return { ref: await this.session.send(req.to, req.text) };
+      return { ref: (await this.session.send(req.to, req.text)) ?? undefined };
     } catch (e) {
       // Not linked / not on WhatsApp: retrying won't help. Anything else (browser hiccup) might.
       const permanent = e instanceof WebNotReadyError || e instanceof NotOnWhatsAppError;

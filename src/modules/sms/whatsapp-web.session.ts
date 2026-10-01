@@ -15,8 +15,12 @@ export interface WebClient {
   initialize(): Promise<void>;
   destroy(): Promise<void>;
   logout(): Promise<void>;
+  getState(): Promise<string | null>;
   getNumberId(number: string): Promise<{ _serialized: string } | null>;
-  sendMessage(chatId: string, content: string): Promise<{ id: { _serialized: string } }>;
+  sendMessage(chatId: string, content: string): Promise<{ id?: { _serialized?: string } } | undefined>;
+  getChatById(chatId: string): Promise<{
+    fetchMessages(opts: { limit: number; fromMe?: boolean }): Promise<{ body: string; id?: { _serialized?: string } }[]>;
+  }>;
   info?: { wid?: { user?: string } };
 }
 
@@ -66,6 +70,7 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy() {
     clearTimeout(this.restartTimer);
+    clearInterval(this.readyPoll);
     await this.client?.destroy().catch(() => undefined);
   }
 
@@ -91,12 +96,15 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
         this.qr = await toDataURL(qr, { margin: 1, width: 320 });
         this.logger.log('Scan the QR code in Admin → Settings → WhatsApp & notifications to link the phone.');
       });
-      client.on('ready', () => {
-        this.state = 'ready';
-        this.qr = null;
-        this.lastError = null;
-        this.logger.log(`WhatsApp linked (${this.number ?? 'unknown number'}).`);
+      client.on('ready', () => this.markReady('ready event'));
+      client.on('authenticated', () => {
+        this.logger.log('WhatsApp session authenticated, loading chats…');
+        this.watchForConnected(client);
       });
+      client.on('loading_screen', (percent: number, message: string) =>
+        this.logger.log(`WhatsApp loading ${percent}% ${message ?? ''}`),
+      );
+      client.on('change_state', (s: string) => this.logger.log(`WhatsApp state: ${s}`));
       client.on('auth_failure', (msg: string) => {
         this.state = 'failed';
         this.lastError = `Authentication failed: ${msg}`;
@@ -139,7 +147,37 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
 
   private refreshing = false;
 
+  private markReady(how: string) {
+    if (this.state === 'ready') return;
+    clearInterval(this.readyPoll);
+    this.state = 'ready';
+    this.qr = null;
+    this.lastError = null;
+    this.logger.log(`WhatsApp linked (${this.number ?? 'number pending'}) — ${how}.`);
+  }
+
+  private readyPoll?: NodeJS.Timeout;
+
+  /**
+   * whatsapp-web.js sometimes never emits "ready" when it restores a saved
+   * login on current WhatsApp Web. After authentication, poll the connection
+   * state and treat CONNECTED as ready.
+   */
+  private watchForConnected(client: WebClient) {
+    clearInterval(this.readyPoll);
+    let tries = 0;
+    this.readyPoll = setInterval(async () => {
+      if (this.state === 'ready' || this.client !== client || ++tries > 60) return clearInterval(this.readyPoll);
+      try {
+        if ((await client.getState()) === 'CONNECTED') this.markReady('connection state');
+      } catch {
+        // page still loading
+      }
+    }, 3000);
+  }
+
   async restart() {
+    clearInterval(this.readyPoll);
     await this.client?.destroy().catch(() => undefined);
     this.client = null;
     this.state = 'off';
@@ -175,9 +213,29 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     const id = await this.client.getNumberId(to);
     if (!id) throw new NotOnWhatsAppError();
-    const sent = await this.client.sendMessage(id._serialized, text);
-    this.lastSendAt = Date.now();
-    return sent.id._serialized;
+    let sent: { id?: { _serialized?: string } } | undefined;
+    try {
+      sent = await this.client.sendMessage(id._serialized, text);
+    } catch (e) {
+      // whatsapp-web.js can fail *after* WhatsApp accepted the message
+      // (e.g. "Cannot read properties of undefined (reading 'id')" when
+      // WhatsApp Web changes). Treat it as sent — retrying would send it twice.
+      this.logger.warn(`sendMessage reported an error after sending: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      this.lastSendAt = Date.now();
+    }
+    return sent?.id?._serialized ?? (await this.lastSentId(id._serialized, text));
+  }
+
+  /** Finds the message we just sent when the library couldn't return it (for delivery ticks). */
+  private async lastSentId(chatId: string, text: string): Promise<string | null> {
+    try {
+      const chat = await this.client!.getChatById(chatId);
+      const recent = await chat.fetchMessages({ limit: 5, fromMe: true });
+      return recent.reverse().find((m) => m.body === text)?.id?._serialized ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** Delivery / read receipts from the phone. */

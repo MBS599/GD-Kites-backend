@@ -9,12 +9,23 @@ class FakeClient extends EventEmitter implements WebClient {
   async initialize() {}
   async destroy() {}
   async logout() {}
+  async getState() {
+    return 'CONNECTED';
+  }
   async getNumberId(n: string) {
     return this.onWhatsApp.has(n) ? { _serialized: `${n}@c.us` } : null;
   }
+  /** Simulates the whatsapp-web.js bug: message goes out, then the library throws. */
+  breakAfterSend = false;
   async sendMessage(chatId: string, text: string) {
     this.sent.push({ chatId, text, at: Date.now() });
+    if (this.breakAfterSend) throw new TypeError("Cannot read properties of undefined (reading 'id')");
     return { id: { _serialized: `msg-${this.sent.length}` } };
+  }
+  async getChatById() {
+    return {
+      fetchMessages: async () => this.sent.map((m, i) => ({ body: m.text, id: { _serialized: `msg-${i + 1}` } })),
+    };
   }
 }
 
@@ -61,6 +72,15 @@ describe('WhatsApp Web (linked phone)', () => {
     expect(restart).toHaveBeenCalledTimes(1);
   });
 
+  it('becomes ready from the connection state when the library never emits "ready"', async () => {
+    const { s, fake } = session();
+    await s.start();
+    fake.emit('authenticated');
+    for (let i = 0; i < 20 && s.state !== 'ready'; i++) await new Promise((r) => setTimeout(r, 250));
+    expect(s.state).toBe('ready');
+    await s.onModuleDestroy();
+  });
+
   it('refuses to send before linking, with a clear message and no retry', async () => {
     const { s } = session();
     const err = await new WhatsAppWebProvider(s)
@@ -86,6 +106,16 @@ describe('WhatsApp Web (linked phone)', () => {
     const missing = await p.send({ event: 'test', to: '919999999999', vars: [], text: 'x' }).catch((e) => e);
     expect(missing.message).toContain('not on WhatsApp');
     expect(missing.retryable).toBe(false);
+  });
+
+  it('a library error after sending is not retried (no duplicates) and the message id is recovered', async () => {
+    const { s, fake } = session();
+    await s.start();
+    fake.emit('ready');
+    fake.breakAfterSend = true;
+    const res = await new WhatsAppWebProvider(s).send({ event: 'test', to: '919822011122', vars: [], text: 'hello' });
+    expect(fake.sent).toHaveLength(1);
+    expect(res.ref).toBe('msg-1');
   });
 
   it('records delivered / read receipts', async () => {
