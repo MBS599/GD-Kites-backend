@@ -18,6 +18,8 @@ import { DriversService } from './drivers/drivers.service';
 import { VehicleTypesController } from './drivers/vehicle-types.controller';
 import { OrdersController } from './orders/orders.controller';
 import { OrdersService } from './orders/orders.service';
+import { DispatchController } from './orders/dispatch.controller';
+import { DispatchService } from './orders/dispatch.service';
 import { RealtimeGateway } from './realtime/realtime.gateway';
 import { RealtimeService } from './realtime/realtime.service';
 import { ReportsController } from './reports/reports.controller';
@@ -88,7 +90,7 @@ export class CatalogModule {}
 export class CartModule {}
 
 /** Orders, checkout and tracking. */
-@Module({ controllers: [OrdersController], providers: [OrdersService] })
+@Module({ controllers: [OrdersController, DispatchController], providers: [OrdersService, DispatchService, RoutingService] })
 export class OrdersModule {}
 
 /** Driver profiles plus the Socket.IO gateway (which handles driver location). */

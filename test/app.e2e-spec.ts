@@ -501,6 +501,62 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('dispatch planning', () => {
+    /** Places + confirms an order for `who` at their address in `area`. */
+    const confirmedOrderAt = async (who: Session, area: string) => {
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(who))).body.products[0];
+      const addr = (await http.get(`${API}/addresses`).set(auth(who))).body.addresses.find((a: any) => a.area === area);
+      await http.post(`${API}/cart/items`).set(auth(who)).send({ productId: kite.id, qty: 50 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(who)).send({ addressId: addr.id }).expect(201)).body.order;
+      await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(200);
+      return order.id as string;
+    };
+
+    it('groups orders around the oldest one and assigns the whole group to one driver', async () => {
+      const ganesh = await login('shreeganesh.traders@gmail.com');
+      const bazaar = await login('kitebazaar.hadapsar@gmail.com');
+      const katraj = await confirmedOrderAt(customer, 'Katraj');
+      const hadapsar = await confirmedOrderAt(bazaar, 'Hadapsar');
+      const bibwewadi = await confirmedOrderAt(ganesh, 'Bibwewadi');
+      const dhankawadi = await confirmedOrderAt(customer, 'Dhankawadi');
+      // Make the Katraj order the oldest waiting one, so it starts the first group.
+      await prisma.order.updateMany({
+        where: { status: 'CONFIRMED', id: { notIn: [katraj, hadapsar, bibwewadi, dhankawadi] } },
+        data: { placedAt: new Date(Date.now() + 86_400_000) },
+      });
+      await prisma.order.update({ where: { id: katraj }, data: { placedAt: new Date(Date.now() - 3_600_000) } });
+
+      const plan = (await http.get(`${API}/dispatch/plan`).set(auth(admin)).query({ radiusKm: 4 }).expect(200)).body;
+      const groupOf = (id: string) => plan.groups.find((g: any) => g.orders.some((o: any) => o.id === id));
+      const katrajGroup = groupOf(katraj);
+      const ids = katrajGroup.orders.map((o: any) => o.id);
+      expect(ids).toEqual(expect.arrayContaining([katraj, bibwewadi, dhankawadi]));
+      expect(ids).not.toContain(hadapsar); // ≈7 km away: its own group
+      expect(groupOf(hadapsar)).not.toBe(katrajGroup);
+      expect(katrajGroup.route.distanceKm).toBeGreaterThan(0);
+      expect(katrajGroup.suggestedDriver).toMatchObject({ id: expect.any(String), reason: expect.any(String) });
+      expect(katrajGroup.suggestedDriver.fareTotal).toBeGreaterThan(0);
+      // Each driver is suggested for at most one group.
+      const suggested = plan.groups.map((g: any) => g.suggestedDriver?.id).filter(Boolean);
+      expect(new Set(suggested).size).toBe(suggested.length);
+
+      // One tap: the whole group to one driver.
+      const res = (
+        await http.post(`${API}/dispatch/assign`).set(auth(admin)).send({ driverId: katrajGroup.suggestedDriver.id, orderIds: ids }).expect(200)
+      ).body;
+      expect(res.assigned).toBe(ids.length);
+      const assigned = await prisma.delivery.findMany({ where: { orderId: { in: ids } } });
+      expect(new Set(assigned.map((d) => d.driverId))).toEqual(new Set([katrajGroup.suggestedDriver.id]));
+
+      // For a single order, drivers already working nearby are ranked first.
+      const ranked = (await http.get(`${API}/orders/${hadapsar}/driver-suggestions`).set(auth(admin)).expect(200)).body.drivers;
+      expect(ranked.length).toBeGreaterThan(0);
+      expect(ranked[0]).toMatchObject({ driverId: expect.any(String), reason: expect.any(String) });
+
+      await http.get(`${API}/dispatch/plan`).set(auth(customer)).expect(403);
+    });
+  });
+
   describe('cancellation & inventory', () => {
     it('admin reject returns reserved stock and frees the driver', async () => {
       const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
