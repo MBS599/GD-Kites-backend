@@ -5,7 +5,7 @@ import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLeng
 import { CurrentUser, Roles, type AuthUser } from '../../common/auth.decorators';
 import { OrdersService } from './orders.service';
 
-const STATUSES = ['pending', 'confirmed', 'assigned', 'outForDelivery', 'delivered', 'cancelled'];
+const STATUSES = ['awaitingPayment', 'pending', 'confirmed', 'assigned', 'outForDelivery', 'delivered', 'cancelled'];
 
 export class OrderListQuery {
   /** Comma-separated statuses, e.g. `pending,confirmed`. */
@@ -73,7 +73,8 @@ export class OrdersController {
   @Roles('CUSTOMER')
   @Post()
   async place(@CurrentUser() user: AuthUser, @Body() dto: PlaceOrderDto) {
-    return { order: await this.orders.place(user, dto.addressId) };
+    // checkout: open Razorpay Checkout with it (null when nothing is paid online).
+    return this.orders.place(user, dto.addressId);
   }
 
   @Roles('CUSTOMER')

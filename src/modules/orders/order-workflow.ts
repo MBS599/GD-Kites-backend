@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import type { OrderStatus, Role } from '@prisma/client';
+import type { OrderStatus, PaymentMethod, Prisma, Role } from '@prisma/client';
 import { checkTransition, type OrderAction } from '../../domain/orderStateMachine';
 import { driverInclude } from '../../common/serializers';
 import type { Tx } from '../../prisma/prisma.service';
@@ -20,9 +20,9 @@ export async function moveOrder(
   orderId: string,
   from: OrderStatus,
   to: OrderStatus,
-  actorId: string,
+  actorId: string | null,
   note?: string | null,
-  extra: { rejectionReason?: string; deliveredAt?: Date } = {},
+  extra: { rejectionReason?: string; deliveredAt?: Date; paidOnline?: Prisma.Decimal; paymentMethod?: PaymentMethod } = {},
 ) {
   const res = await tx.order.updateMany({ where: { id: orderId, status: from }, data: { status: to, ...extra } });
   if (res.count === 0) throw new ConflictException('This order was just updated by someone else. Refresh and try again.');
@@ -40,7 +40,7 @@ export async function refreshDriverAvailability(tx: Tx, driverId: string) {
 }
 
 /** Returns reserved stock for every line of an order and logs it. */
-export async function releaseStock(tx: Tx, orderId: string, actorId: string) {
+export async function releaseStock(tx: Tx, orderId: string, actorId: string | null) {
   const items = await tx.orderItem.findMany({ where: { orderId } });
   for (const i of items) {
     const p = await tx.product.update({ where: { id: i.productId }, data: { stock: { increment: i.qty } } });

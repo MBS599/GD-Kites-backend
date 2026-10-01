@@ -2,6 +2,7 @@ import { Body, Controller, Get, Injectable, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
 import { Roles } from '../../common/auth.decorators';
+import type { AppSettings } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /** Hard ceiling (also enforced by a DB CHECK constraint). */
@@ -24,12 +25,18 @@ export class UpdateSettingsDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 1 }) @Min(0.5) @Max(RADIUS_CEILING_KM) dispatchRadiusKm?: number;
   /** Delivery planning: most orders suggested for one driver. Default 8. */
   @IsOptional() @IsInt() @Min(1) @Max(100) dispatchMaxOrders?: number;
+  /** Online payment: GST % on the delivery charge. Default 18. */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(28) deliveryGstPercent?: number;
+  /** Online payment: Razorpay fee % passed to the customer (0 = absorbed). Default 2. */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(5) gatewayFeePercent?: number;
 }
 
-const out = (s: { maxServiceRadiusKm: number; dispatchRadiusKm: number; dispatchMaxOrders: number }) => ({
+const out = (s: AppSettings) => ({
   maxServiceRadiusKm: s.maxServiceRadiusKm,
   dispatchRadiusKm: s.dispatchRadiusKm,
   dispatchMaxOrders: s.dispatchMaxOrders,
+  deliveryGstPercent: s.deliveryGstPercent,
+  gatewayFeePercent: s.gatewayFeePercent,
 });
 
 @ApiTags('Settings')

@@ -25,6 +25,8 @@ enum DriverAvailability {
 }
 
 enum OrderStatus {
+  /// Placed; waiting for the online delivery-charge payment (stock is held meanwhile).
+  AWAITING_PAYMENT
   PENDING
   CONFIRMED
   ASSIGNED
@@ -42,6 +44,17 @@ enum DeliveryStatus {
 
 enum PaymentMethod {
   CASH_ON_DELIVERY
+  /// Delivery charge paid online (Razorpay) at checkout; goods paid in cash on delivery.
+  DELIVERY_PREPAID
+}
+
+enum PaymentStatus {
+  CREATED
+  PAID
+  FAILED
+  REFUND_PENDING
+  REFUNDED
+  REFUND_FAILED
 }
 
 enum InventoryReason {
@@ -107,6 +120,10 @@ model AppSettings {
   dispatchRadiusKm   Float    @default(4)
   /// Delivery planning: most orders suggested for one driver.
   dispatchMaxOrders  Int      @default(8)
+  /// Online payment: GST % added to the delivery charge.
+  deliveryGstPercent Float    @default(18)
+  /// Online payment: Razorpay fee % passed to the customer (0 = the business absorbs it).
+  gatewayFeePercent  Float    @default(2)
   updatedAt          DateTime @updatedAt
 }
 
@@ -263,6 +280,13 @@ model Order {
   subtotal        Decimal              @db.Decimal(12, 2)
   deliveryCharge  Decimal              @db.Decimal(10, 2)
   total           Decimal              @db.Decimal(12, 2)
+  /// Online payment only: GST on the delivery charge and the Razorpay fee passed on (both in total).
+  deliveryTax     Decimal              @default(0) @db.Decimal(10, 2)
+  paymentFee      Decimal              @default(0) @db.Decimal(10, 2)
+  /// Paid online so far (the delivery charge); the rest is collected in cash on delivery.
+  paidOnline      Decimal              @default(0) @db.Decimal(12, 2)
+  /// AWAITING_PAYMENT orders are cancelled (stock released) after this.
+  paymentDueBy    DateTime?
   // Delivery address snapshot — later edits to saved addresses never change an order.
   addrLabel       String
   addrArea        String
@@ -281,6 +305,7 @@ model Order {
   items           OrderItem[]
   history         OrderStatusHistory[]
   delivery        Delivery?
+  payments        Payment[]
 
   @@index([customerId, placedAt])
   @@index([status, placedAt])
@@ -379,21 +404,21 @@ enum SmsStatus {
 
 /// Audit log of every SMS attempt (never stores anything secret).
 model SmsMessage {
-  id          String    @id @default(uuid())
-  event       String
+  id             String    @id @default(uuid())
+  event          String
   /// 12-digit Indian number, e.g. 919822011122
-  to          String
-  userId      String?
-  orderId     String?
-  body        String
-  status      SmsStatus
-  provider    String
-  providerRef String?
-  error       String?
+  to             String
+  userId         String?
+  orderId        String?
+  body           String
+  status         SmsStatus
+  provider       String
+  providerRef    String?
+  error          String?
   /// Latest delivery report from the gateway (WhatsApp: sent / delivered / read / failed).
   deliveryStatus String?
-  statusAt    DateTime?
-  createdAt   DateTime  @default(now())
+  statusAt       DateTime?
+  createdAt      DateTime  @default(now())
 
   @@index([createdAt])
   @@index([providerRef])
@@ -426,4 +451,30 @@ model DeviceToken {
   lastSeenAt DateTime @default(now())
 
   @@index([userId])
+}
+
+/// Online payment for an order (Razorpay): the delivery charge, paid at checkout.
+model Payment {
+  id                String        @id @default(uuid())
+  orderId           String
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider          String        @default("razorpay")
+  /// Razorpay order id (order_...). One order can take several attempts until one succeeds.
+  providerOrderId   String        @unique
+  /// Razorpay payment id (pay_...) of the successful attempt.
+  providerPaymentId String?       @unique
+  amount            Decimal       @db.Decimal(10, 2)
+  currency          String        @default("INR")
+  status            PaymentStatus @default(CREATED)
+  /// upi / card / netbanking / wallet
+  method            String?
+  error             String?
+  refundId          String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  paidAt            DateTime?
+  refundedAt        DateTime?
+
+  @@index([orderId])
+  @@index([status])
 }

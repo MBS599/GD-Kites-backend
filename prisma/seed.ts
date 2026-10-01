@@ -197,6 +197,7 @@ async function main() {
   // ---- Orders -----------------------------------------------------------------------
   type P = (typeof p)[keyof typeof p];
   const timeline: Record<OrderStatus, OrderStatus[]> = {
+    AWAITING_PAYMENT: ['AWAITING_PAYMENT'],
     PENDING: ['PENDING'],
     CONFIRMED: ['PENDING', 'CONFIRMED'],
     ASSIGNED: ['PENDING', 'CONFIRMED', 'ASSIGNED'],

@@ -49,3 +49,30 @@ export const AVG_SPEED_KMPH = 22;
 export function etaMinutes(distanceKm: number): number {
   return Math.max(5, Math.round((distanceKm / AVG_SPEED_KMPH) * 60));
 }
+
+/** GST Razorpay charges on its own fee (fixed by law). */
+export const GATEWAY_FEE_GST_PERCENT = 18;
+
+export interface OnlineCharges {
+  /** GST on the delivery charge. */
+  tax: number;
+  /** Razorpay's fee (+ GST on it), passed to the customer. */
+  fee: number;
+  /** What the customer pays online: delivery charge + tax + fee. */
+  total: number;
+}
+
+/**
+ * Amount paid online for the delivery charge, in rupees with paise precision.
+ * The fee is grossed up so that after Razorpay deducts feePercent (+18% GST on
+ * it) from the amount charged, the business still receives delivery + tax.
+ */
+export function onlineChargesFor(deliveryCharge: number, gstPercent: number, feePercent: number): OnlineCharges {
+  const paise = (rupees: number) => Math.round(rupees * 100);
+  const base = paise(deliveryCharge);
+  const tax = Math.round((base * gstPercent) / 100);
+  const net = base + tax;
+  const feeRate = (feePercent / 100) * (1 + GATEWAY_FEE_GST_PERCENT / 100);
+  const charged = feeRate > 0 ? Math.ceil(net / (1 - feeRate)) : net;
+  return { tax: tax / 100, fee: (charged - net) / 100, total: charged / 100 };
+}

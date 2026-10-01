@@ -121,6 +121,19 @@ Cost: Meta's per-message rate for utility and authentication messages in India (
 - Sending never blocks or fails an order action. Retries twice on network / 5xx / rate-limit errors; the same text to the same number for the same order within 10 minutes is sent once. Every attempt is stored in `SmsMessage` (Admin → WhatsApp & notifications, `GET /sms/messages`) with one-time codes masked; `POST /sms/test` sends the test template.
 - The queue is in-process: messages still queued when the server stops are not resent. For high volume move it to a job queue (BullMQ/Redis).
 
+## Payments: delivery charge online (Razorpay), rest cash on delivery
+
+With `PAYMENTS_PROVIDER=razorpay` the customer pays the **delivery charge + GST on it + the Razorpay fee** online at checkout; the items are paid in cash to the driver. GST % (default 18) and the fee % passed on (default 2, plus 18% GST on the fee; 0 = absorbed) are admin settings (`PATCH settings {deliveryGstPercent, gatewayFeePercent}`); both are fixed on the order when it is placed (`deliveryTax`, `paymentFee`, included in `total`). With `none` (default) everything is cash on delivery.
+
+1. `POST orders` reserves the stock and creates the order as `AWAITING_PAYMENT` with a Razorpay order for the delivery charge (amount always from the database). The response has `checkout` (key id, Razorpay order id, amount in paise, prefill) for Razorpay Checkout.
+2. On success the app sends `POST orders/:id/payment/verify {razorpayOrderId, razorpayPaymentId, razorpaySignature}`. The server checks the signature (HMAC with the key secret), fetches the payment from Razorpay, checks order id / amount / currency, captures it if only authorised, then moves the order to `PENDING` (`paymentMethod: deliveryPrepaid`, `paidOnline`, `dueOnDelivery`). The customer and admins are notified only now.
+3. The webhook `POST webhooks/razorpay` (signature: `X-Razorpay-Signature`, HMAC of the raw body with `RAZORPAY_WEBHOOK_SECRET`) does the same if the app never comes back. Verify and webhook are idempotent.
+4. `POST orders/:id/payment` reopens checkout for an unpaid order (reuses the same Razorpay order).
+5. Unpaid after `PAYMENT_TIMEOUT_MIN` (15): the order is cancelled and its stock released. Razorpay is asked first, so a payment whose callback was lost is still honoured.
+6. Customer cancel / admin reject refunds the delivery charge automatically (Razorpay refund). A payment that arrives after the order was cancelled is refunded too. A failed refund shows as "Refund failed" on the admin order screen.
+
+Drivers collect `dueOnDelivery` (the items) in cash.
+
 ## Security
 
 - **Mobile OTP sign-in**: `POST /auth/otp/request {phone}` sends a 6-digit code on WhatsApp (valid 5 min; one request per 30 s and 5 per hour per number; the endpoint is also IP-throttled). `POST /auth/otp/verify {phone, code, name?}` allows 5 wrong tries per code and each code works once. Only an HMAC of the code is stored (`OtpChallenge`) and the message log masks it. An unknown number becomes a `CUSTOMER` (the API answers `422 name_required` until a name is sent); a number already on a customer/driver account signs into that account; **admins must use Google**. A number proven by OTP is kept in `phoneVerified`; OTP-only accounts cannot change their number from the profile. Disabled in production unless WhatsApp is configured (`GET /auth/config` → `otpLogin`).
@@ -131,7 +144,7 @@ Cost: Meta's per-message rate for utility and authentication messages in India (
 - Every request reloads the user, so deactivation/role changes apply immediately.
 - Drivers only see and act on orders currently assigned to them (404 otherwise). Customers only see their own orders.
 - Status changes go through `domain/orderStateMachine.ts` plus conditional updates (optimistic concurrency).
-- Prices, totals, delivery charge and driver fare are always computed on the server.
+- Prices, totals, delivery charge and driver fare are always computed on the server. Online payments are verified on the server (signature + Razorpay API); the key secret never leaves the server.
 - Rate limiting (300 req/min/IP; stricter on auth routes). Uploads: JPG/PNG/WEBP only, ≤ 5 MB, random filenames.
 
 ## Endpoints (all under `/api/v1`)
@@ -146,7 +159,8 @@ Cost: Meta's per-message rate for utility and authentication messages in India (
 | Inventory | `GET inventory?lowOnly`, `POST inventory/:productId/adjust`, `GET inventory/:productId/movements` | admin |
 | Cart | `GET cart`, `POST cart/items`, `PATCH cart/items/:productId`, `DELETE cart/items/:productId`, `DELETE cart` | customer |
 | Orders | `GET orders?status&q`, `GET orders/:id`, `GET orders/:id/tracking` | scoped by role |
-| Checkout | `POST orders {addressId}`, `POST orders/:id/cancel` | customer |
+| Checkout | `POST orders {addressId}`, `POST orders/:id/cancel`, `POST orders/:id/payment`, `POST orders/:id/payment/verify` | customer |
+| Payment webhook | `POST webhooks/razorpay` | Razorpay (signed) |
 | Order admin | `POST orders/:id/confirm`, `POST orders/:id/assign {driverId}`, `POST orders/:id/reject {reason}` | admin |
 | Driver | `GET drivers/me`, `PATCH drivers/me/availability`, `POST drivers/me/location` | driver |
 | Deliveries | `GET deliveries?scope`, `GET deliveries/:orderId`, `POST deliveries/:orderId/start`, `POST deliveries/:orderId/proof` (multipart `file`), `POST deliveries/:orderId/complete` | driver |

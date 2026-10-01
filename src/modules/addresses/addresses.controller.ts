@@ -6,9 +6,12 @@ import { CurrentUser, Roles, type AuthUser } from '../../common/auth.decorators'
 import { addressOut } from '../../common/serializers';
 import { PHONE_MSG, PHONE_RE } from '../../common/validation';
 import { distanceFromHub, findServiceArea } from '../../domain/geofence';
-import { deliveryChargeFor } from '../../domain/pricing';
+import { deliveryChargeFor, onlineChargesFor } from '../../domain/pricing';
+import { SettingsService } from '../settings/settings.controller';
 import { deliveryTariffOf } from '../../common/rates';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env';
 import { ServiceAreasService } from '../service-areas/service-areas.service';
 
 export class CreateAddressDto {
@@ -36,6 +39,8 @@ export class AddressesController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly areas: ServiceAreasService,
+    private readonly config: ConfigService<Env, true>,
+    private readonly settings: SettingsService,
   ) {}
 
   /** Coverage is re-evaluated against current service areas on every read. */
@@ -87,13 +92,32 @@ export class AddressesController {
     const hit = await this.areas.resolve(q.lat, q.lng);
     if (!hit) {
       const names = (await this.areas.active()).map((a) => a.name);
-      return { serviceable: false, serviceArea: null, servedAreas: names, distanceKm: null, deliveryCharge: null };
+      return {
+        serviceable: false,
+        serviceArea: null,
+        servedAreas: names,
+        distanceKm: null,
+        deliveryCharge: null,
+        deliveryTax: 0,
+        paymentFee: 0,
+        payOnline: 0,
+      };
     }
+    const deliveryCharge = deliveryChargeFor(hit.distanceKm, deliveryTariffOf(hit.area));
+    // Online payments: delivery charge + GST + gateway fee paid now; the items in cash on delivery.
+    const online = this.config.get('PAYMENTS_PROVIDER') === 'razorpay' && deliveryCharge > 0;
+    const s = online ? await this.settings.get() : null;
+    const charges = s ? onlineChargesFor(deliveryCharge, s.deliveryGstPercent, s.gatewayFeePercent) : null;
     return {
       serviceable: true,
       serviceArea: { id: hit.area.id, name: hit.area.name },
       distanceKm: hit.distanceKm,
-      deliveryCharge: deliveryChargeFor(hit.distanceKm, deliveryTariffOf(hit.area)),
+      deliveryCharge,
+      deliveryTax: charges?.tax ?? 0,
+      paymentFee: charges?.fee ?? 0,
+      deliveryGstPercent: s?.deliveryGstPercent ?? 0,
+      /** Paid online at checkout; 0 = everything cash on delivery. */
+      payOnline: charges?.total ?? 0,
     };
   }
 

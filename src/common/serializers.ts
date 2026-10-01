@@ -6,6 +6,7 @@ import type {
   Order,
   OrderItem,
   OrderStatusHistory,
+  Payment,
   Prisma,
   Product,
   ServiceArea,
@@ -39,6 +40,7 @@ export type FullOrder = Order & {
   history: OrderStatusHistory[];
   delivery: (Delivery & { driver: DriverWithUser }) | null;
   serviceArea: ServiceArea | null;
+  payments?: Payment[];
 };
 
 export const productInclude = { category: true } as const;
@@ -52,7 +54,23 @@ export const orderInclude = {
   history: true,
   serviceArea: true,
   delivery: { include: { driver: { include: driverInclude } } },
+  payments: { orderBy: { createdAt: 'desc' } },
 } as const;
+
+/** The payment that tells the story: the successful/refunded one, else the latest attempt. */
+function paymentOut(payments: Payment[] | undefined) {
+  if (!payments?.length) return null;
+  const p = payments.find((x) => x.status !== 'CREATED' && x.status !== 'FAILED') ?? payments[0];
+  return {
+    status: camel(p.status),
+    amount: m(p.amount),
+    method: p.method,
+    reference: p.providerPaymentId,
+    paidAt: p.paidAt?.toISOString() ?? null,
+    refundedAt: p.refundedAt?.toISOString() ?? null,
+    error: p.error,
+  };
+}
 
 export function serviceAreaOut(a: ServiceArea) {
   return {
@@ -191,7 +209,15 @@ export function orderOut(o: FullOrder) {
     })),
     subtotal: m(o.subtotal),
     deliveryCharge: m(o.deliveryCharge),
+    /** Online payment only: GST on the delivery charge and the gateway fee (both included in total). */
+    deliveryTax: m(o.deliveryTax),
+    paymentFee: m(o.paymentFee),
     total: m(o.total),
+    /** Paid online (the delivery charge); the rest is cash on delivery. */
+    paidOnline: m(o.paidOnline),
+    dueOnDelivery: m(o.total.sub(o.paidOnline)),
+    paymentDueBy: o.paymentDueBy?.toISOString() ?? null,
+    payment: paymentOut(o.payments),
     address: {
       id: o.addressId ?? `order-${o.id}`,
       label: o.addrLabel,

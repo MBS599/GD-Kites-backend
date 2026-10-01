@@ -15,3 +15,8 @@ process.env.MESSAGING_ALLOWLIST = ''; // a dev allowlist in .env would skip the 
 process.env.FIREBASE_SERVICE_ACCOUNT = '';
 process.env.WHATSAPP_APP_SECRET = 'test-app-secret';
 process.env.WHATSAPP_VERIFY_TOKEN = 'test-verify-token';
+// Online payments are switched on per test (Razorpay itself is faked); these only sign test payloads.
+process.env.PAYMENTS_PROVIDER = 'none';
+process.env.RAZORPAY_KEY_ID = 'rzp_test_e2e';
+process.env.RAZORPAY_KEY_SECRET = 'rzp-test-secret';
+process.env.RAZORPAY_WEBHOOK_SECRET = 'rzp-webhook-secret';

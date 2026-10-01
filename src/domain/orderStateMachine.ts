@@ -11,20 +11,22 @@ interface Rule {
 /**
  * Single source of truth for order transitions, shared by every role.
  *
- * PENDING → CONFIRMED → ASSIGNED → OUT_FOR_DELIVERY → DELIVERED
- * Admin may reject before dispatch; a customer may cancel while PENDING.
+ * [AWAITING_PAYMENT →] PENDING → CONFIRMED → ASSIGNED → OUT_FOR_DELIVERY → DELIVERED
+ * AWAITING_PAYMENT → PENDING happens when the online delivery-charge payment succeeds.
+ * Admin may reject before dispatch; a customer may cancel while unpaid or PENDING.
  * `assign` on an ASSIGNED order re-assigns the driver.
  */
 export const ORDER_RULES: Record<OrderAction, Rule> = {
   confirm: { from: ['PENDING'], to: 'CONFIRMED', roles: ['ADMIN'] },
   assign: { from: ['CONFIRMED', 'ASSIGNED'], to: 'ASSIGNED', roles: ['ADMIN'] },
   reject: { from: ['PENDING', 'CONFIRMED', 'ASSIGNED'], to: 'CANCELLED', roles: ['ADMIN'] },
-  cancel: { from: ['PENDING'], to: 'CANCELLED', roles: ['CUSTOMER'] },
+  cancel: { from: ['AWAITING_PAYMENT', 'PENDING'], to: 'CANCELLED', roles: ['CUSTOMER'] },
   start: { from: ['ASSIGNED'], to: 'OUT_FOR_DELIVERY', roles: ['DRIVER'] },
   complete: { from: ['OUT_FOR_DELIVERY'], to: 'DELIVERED', roles: ['DRIVER'] },
 };
 
 export const STATUS_LABELS: Record<OrderStatus, string> = {
+  AWAITING_PAYMENT: 'Awaiting payment',
   PENDING: 'Pending',
   CONFIRMED: 'Confirmed',
   ASSIGNED: 'Assigned',
@@ -50,4 +52,4 @@ export function checkTransition(action: OrderAction, current: OrderStatus, role:
 }
 
 /** Orders in these states hold reserved stock that must be returned on cancellation. */
-export const STOCK_RESERVED: OrderStatus[] = ['PENDING', 'CONFIRMED', 'ASSIGNED', 'OUT_FOR_DELIVERY'];
+export const STOCK_RESERVED: OrderStatus[] = ['AWAITING_PAYMENT', 'PENDING', 'CONFIRMED', 'ASSIGNED', 'OUT_FOR_DELIVERY'];

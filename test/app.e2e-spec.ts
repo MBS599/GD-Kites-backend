@@ -13,6 +13,8 @@ import { SmsService } from '../src/modules/sms/sms.service';
 import { PushService } from '../src/modules/sms/push.service';
 import { createHmac } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { PaymentsService } from '../src/modules/payments/payments.service';
+import { RazorpayClient, type RzpPayment } from '../src/modules/payments/razorpay.client';
 
 const API = '/api/v1';
 
@@ -565,6 +567,153 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('online payment of the delivery charge (Razorpay)', () => {
+    const sign = (secret: string, payload: string) => createHmac('sha256', secret).update(payload).digest('hex');
+    const rzpPayments = new Map<string, RzpPayment>();
+    let rzpOrders = 0;
+    let rzp: RazorpayClient;
+    let restore: jest.SpyInstance[] = [];
+
+    beforeAll(() => {
+      rzp = app.get(RazorpayClient);
+      const payments = app.get(PaymentsService);
+      restore = [
+        jest.spyOn(payments, 'enabled', 'get').mockReturnValue(true),
+        jest.spyOn(rzp, 'createOrder').mockImplementation(async (amount) => ({
+          id: `order_E2E${++rzpOrders}`,
+          amount,
+          currency: 'INR',
+          status: 'created',
+        })),
+        jest.spyOn(rzp, 'fetchPayment').mockImplementation(async (id) => {
+          const p = rzpPayments.get(id);
+          if (!p) throw new Error('no such payment');
+          return p;
+        }),
+        jest.spyOn(rzp, 'capture').mockImplementation(async (id) => {
+          const p = { ...rzpPayments.get(id)!, status: 'captured' as const };
+          rzpPayments.set(id, p);
+          return p;
+        }),
+        jest.spyOn(rzp, 'refund').mockImplementation(async () => ({ id: `rfnd_E2E${rzpOrders}`, status: 'processed' })),
+        jest.spyOn(rzp, 'orderPayments').mockResolvedValue([]),
+      ];
+    });
+    afterAll(() => restore.forEach((r) => r.mockRestore()));
+
+    const placeUnpaid = async () => {
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+      const body = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(201)).body;
+      return { ...body, productId: kite.id as string };
+    };
+    const stockOf = async (id: string) => (await prisma.product.findUniqueOrThrow({ where: { id } })).stock;
+
+    it('customer pays only the delivery charge online; the rest is cash on delivery', async () => {
+      const { order, checkout, productId } = await placeUnpaid();
+      expect(order.status).toBe('awaitingPayment');
+      expect(order.paymentDueBy).toEqual(expect.any(String));
+      // Amount comes from the server's order, in paise.
+      // Online: delivery charge + 18% GST + Razorpay fee (2% + GST on it) passed on; items stay cash on delivery.
+      const online = Math.round((order.deliveryCharge + order.deliveryTax + order.paymentFee) * 100) / 100;
+      expect(order.deliveryTax).toBe(Math.round(order.deliveryCharge * 18) / 100);
+      expect(order.paymentFee).toBeGreaterThan(0);
+      expect(order.total).toBeCloseTo(order.subtotal + online, 2);
+      expect(checkout).toMatchObject({ provider: 'razorpay', keyId: 'rzp_test_e2e', amount: Math.round(online * 100), currency: 'INR' });
+      expect(checkout.orderId).toMatch(/^order_/);
+      expect(checkout.prefill.contact).toBeTruthy();
+      // Not visible to the admin as a real order yet.
+      await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(409);
+      const stockHeld = await stockOf(productId);
+
+      // Reopening checkout reuses the same Razorpay order; other customers cannot.
+      const again = (await http.post(`${API}/orders/${order.id}/payment`).set(auth(customer)).expect(200)).body.checkout;
+      expect(again.orderId).toBe(checkout.orderId);
+      const other = await login('shreeganesh.traders@gmail.com');
+      await http.post(`${API}/orders/${order.id}/payment`).set(auth(other)).expect(404);
+
+      // A forged signature is refused.
+      rzpPayments.set('pay_E2E1', { id: 'pay_E2E1', order_id: checkout.orderId, amount: checkout.amount, currency: 'INR', status: 'authorized', method: 'upi' });
+      await http
+        .post(`${API}/orders/${order.id}/payment/verify`)
+        .set(auth(customer))
+        .send({ razorpayOrderId: checkout.orderId, razorpayPaymentId: 'pay_E2E1', razorpaySignature: 'f'.repeat(64) })
+        .expect(400);
+
+      const verify = {
+        razorpayOrderId: checkout.orderId,
+        razorpayPaymentId: 'pay_E2E1',
+        razorpaySignature: sign('rzp-test-secret', `${checkout.orderId}|pay_E2E1`),
+      };
+      const paid = (await http.post(`${API}/orders/${order.id}/payment/verify`).set(auth(customer)).send(verify).expect(200)).body.order;
+      expect(paid.status).toBe('pending');
+      expect(paid.paymentMethod).toBe('deliveryPrepaid');
+      expect(paid.paidOnline).toBe(online);
+      expect(paid.dueOnDelivery).toBe(order.subtotal);
+      expect(paid.payment).toMatchObject({ status: 'paid', method: 'upi', reference: 'pay_E2E1', amount: online });
+      expect(rzp.capture).toHaveBeenCalledWith('pay_E2E1', checkout.amount);
+      expect(await stockOf(productId)).toBe(stockHeld);
+
+      // Verify + webhook both arriving is harmless.
+      await http.post(`${API}/orders/${order.id}/payment/verify`).set(auth(customer)).send(verify).expect(200);
+      const event = JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: rzpPayments.get('pay_E2E1') } } });
+      await http.post(`${API}/webhooks/razorpay`).set('Content-Type', 'application/json').set('X-Razorpay-Signature', 'bad').send(event).expect(401);
+      await http
+        .post(`${API}/webhooks/razorpay`)
+        .set('Content-Type', 'application/json')
+        .set('X-Razorpay-Signature', sign('rzp-webhook-secret', event))
+        .send(event)
+        .expect(200);
+      const history = (await http.get(`${API}/orders/${order.id}`).set(auth(customer)).expect(200)).body.order.history;
+      expect(history.map((h: any) => h.status)).toEqual(['awaitingPayment', 'pending']);
+
+      // Cancelling refunds the delivery charge.
+      const cancelled = (await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200)).body.order;
+      expect(cancelled.status).toBe('cancelled');
+      expect(rzp.refund).toHaveBeenCalledWith('pay_E2E1', checkout.amount, expect.any(Object));
+      expect(cancelled.payment.status).toBe('refunded');
+      expect(cancelled.paidOnline).toBe(0);
+      expect(await stockOf(productId)).toBe(stockHeld + 50);
+    });
+
+    it('the Razorpay webhook alone confirms a payment (app closed before returning)', async () => {
+      const { order, checkout } = await placeUnpaid();
+      rzpPayments.set('pay_E2E2', { id: 'pay_E2E2', order_id: checkout.orderId, amount: checkout.amount, currency: 'INR', status: 'captured', method: 'card' });
+      const event = JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: rzpPayments.get('pay_E2E2') } } });
+      await http
+        .post(`${API}/webhooks/razorpay`)
+        .set('Content-Type', 'application/json')
+        .set('X-Razorpay-Signature', sign('rzp-webhook-secret', event))
+        .send(event)
+        .expect(200);
+      const now = (await http.get(`${API}/orders/${order.id}`).set(auth(customer)).expect(200)).body.order;
+      expect(now).toMatchObject({ status: 'pending', paidOnline: checkout.amount / 100, payment: { status: 'paid', method: 'card' } });
+      // A wrong amount is never accepted.
+      const { order: o2, checkout: c2 } = await placeUnpaid();
+      rzpPayments.set('pay_E2E3', { id: 'pay_E2E3', order_id: c2.orderId, amount: 100, currency: 'INR', status: 'captured' });
+      await http
+        .post(`${API}/orders/${o2.id}/payment/verify`)
+        .set(auth(customer))
+        .send({ razorpayOrderId: c2.orderId, razorpayPaymentId: 'pay_E2E3', razorpaySignature: sign('rzp-test-secret', `${c2.orderId}|pay_E2E3`) })
+        .expect(400);
+      await http.post(`${API}/orders/${o2.id}/cancel`).set(auth(customer)).expect(200);
+      await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
+    });
+
+    it('unpaid orders are cancelled after the time limit and their stock is released', async () => {
+      const { order, productId } = await placeUnpaid();
+      const held = await stockOf(productId);
+      await prisma.order.update({ where: { id: order.id }, data: { paymentDueBy: new Date(Date.now() - 1000) } });
+      expect(await app.get(PaymentsService).expireStale()).toBeGreaterThanOrEqual(1);
+      const now = (await http.get(`${API}/orders/${order.id}`).set(auth(customer)).expect(200)).body.order;
+      expect(now.status).toBe('cancelled');
+      expect(now.rejectionReason).toContain('Payment not completed');
+      expect(await stockOf(productId)).toBe(held + 50);
+      await http.post(`${API}/orders/${order.id}/payment`).set(auth(customer)).expect(409);
+    });
+  });
+
   describe('cancellation & inventory', () => {
     it('admin reject returns reserved stock and frees the driver', async () => {
       const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
@@ -658,7 +807,9 @@ describe('GD Kite Center API (e2e)', () => {
       await http.patch(`${API}/settings`).set(auth(admin)).send({ maxServiceRadiusKm: 5000 }).expect(400);
       // Partial updates keep the other settings.
       const kept = (await http.patch(`${API}/settings`).set(auth(admin)).send({ dispatchRadiusKm: 12.5 }).expect(200)).body.settings;
-      expect(kept).toMatchObject({ maxServiceRadiusKm: 100, dispatchRadiusKm: 12.5, dispatchMaxOrders: 8 });
+      expect(kept).toMatchObject({ maxServiceRadiusKm: 100, dispatchRadiusKm: 12.5, dispatchMaxOrders: 8, deliveryGstPercent: 18, gatewayFeePercent: 2 });
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ deliveryGstPercent: 30 }).expect(400);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ gatewayFeePercent: 6 }).expect(400);
       await http.patch(`${API}/settings`).set(auth(admin)).send({ dispatchMaxOrders: 0 }).expect(400);
       await http.patch(`${API}/settings`).set(auth(admin)).send({ dispatchRadiusKm: 4 }).expect(200);
     });

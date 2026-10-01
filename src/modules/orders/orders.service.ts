@@ -17,6 +17,7 @@ const DELIVERY_OTP_RESEND_MS = 60_000;
 const DELIVERY_OTP_MAX_SENDS = 4;
 import { ServiceAreasService } from '../service-areas/service-areas.service';
 import { assertTransition, moveOrder, refreshDriverAvailability, releaseStock } from './order-workflow';
+import { PaymentsService, type CheckoutSession } from '../payments/payments.service';
 
 @Injectable()
 export class OrdersService {
@@ -26,6 +27,7 @@ export class OrdersService {
     private readonly areas: ServiceAreasService,
     private readonly sms: SmsService,
     private readonly otp: OtpGenerator,
+    private readonly payments: PaymentsService,
   ) {}
 
   private load(id: string) {
@@ -161,6 +163,7 @@ export class OrdersService {
    * records history and inventory movements, then empties the cart.
    */
   async place(customer: AuthUser, addressId: string) {
+    let awaiting = false;
     const order = await this.prisma.tx(async (tx) => {
       const address = await tx.address.findFirst({ where: { id: addressId, userId: customer.id, isDeleted: false } });
       if (!address) throw new BadRequestException('Please choose a valid delivery address.');
@@ -209,14 +212,25 @@ export class OrdersService {
       }
 
       const deliveryCharge = new Prisma.Decimal(deliveryChargeFor(coverage.distanceKm, deliveryTariffOf(coverage.area)));
+      // With online payments on, the delivery charge is paid first; the order reaches the admin once paid.
+      awaiting = this.payments.requiresPayment(deliveryCharge);
+      const status: OrderStatus = awaiting ? 'AWAITING_PAYMENT' : 'PENDING';
+      // Paid online: GST on the delivery charge + the gateway fee (admin settings), added to the total.
+      const online = awaiting ? await this.payments.onlineCharges(deliveryCharge) : { tax: 0, fee: 0 };
+      const deliveryTax = new Prisma.Decimal(online.tax);
+      const paymentFee = new Prisma.Decimal(online.fee);
       const created = await tx.order.create({
         data: {
+          status,
+          paymentDueBy: awaiting ? new Date(Date.now() + this.payments.timeoutMin * 60_000) : null,
           customerId: customer.id,
           addressId: address.id,
           serviceAreaId: coverage.area.id,
           subtotal,
           deliveryCharge,
-          total: subtotal.add(deliveryCharge),
+          deliveryTax,
+          paymentFee,
+          total: subtotal.add(deliveryCharge).add(deliveryTax).add(paymentFee),
           addrLabel: address.label,
           addrArea: address.area,
           addrLine: address.line,
@@ -228,7 +242,7 @@ export class OrdersService {
           contactName: address.contactName ?? customer.businessName ?? customer.name,
           contactPhone: address.contactPhone ?? customer.phone ?? '',
           items: { createMany: { data: itemRows } },
-          history: { create: { status: 'PENDING', actorId: customer.id } },
+          history: { create: { status, actorId: customer.id } },
         },
       });
       await tx.inventoryMovement.createMany({
@@ -245,12 +259,17 @@ export class OrdersService {
       return created;
     });
 
+    let checkout: CheckoutSession | null = null;
+    if (awaiting) {
+      // If Razorpay is unreachable the order still exists; the app offers "Pay now" to retry.
+      checkout = await this.payments.checkout(customer, order.id).catch(() => null);
+    }
     const full = await this.load(order.id);
     this.realtime.orderUpdated(full);
     for (const i of full.items) this.realtime.catalogUpdated(i.productId);
-    this.sms.orderPlaced(full);
+    if (!awaiting) this.sms.orderPlaced(full); // otherwise sent once paid
     await this.alertLowStock(full);
-    return orderOut(full);
+    return { order: orderOut(full), checkout };
   }
 
   async confirm(admin: AuthUser, id: string) {
@@ -322,7 +341,9 @@ export class OrdersService {
     if (revokedDriver) this.realtime.orderRevoked(revokedDriver, id);
     if (freed) this.realtime.driverUpdated(freed);
     const revoked: string | null = revokedDriver;
-    return this.emit(id, (o) => this.sms.orderCancelled(o, reason, revoked));
+    const refunded = await this.payments.refundPaid(id, reason);
+    const told = refunded > 0 ? `${reason}. Your delivery charge of Rs ${refunded} will be refunded in 5-7 working days` : reason;
+    return this.emit(id, (o) => this.sms.orderCancelled(o, told, revoked));
   }
 
   private async emit(id: string, notify?: (o: FullOrder) => void) {

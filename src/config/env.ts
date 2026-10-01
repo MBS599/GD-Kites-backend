@@ -64,6 +64,19 @@ const schema = z
      * service-account JSON, or the JSON itself. Empty = push off.
      */
     FIREBASE_SERVICE_ACCOUNT: z.string().default(''),
+    /**
+     * Online payments. `razorpay`: the customer pays the delivery charge online at
+     * checkout and the rest in cash on delivery. `none` (default): everything is
+     * cash on delivery.
+     */
+    PAYMENTS_PROVIDER: z.enum(['none', 'razorpay']).default('none'),
+    /** Razorpay dashboard → Account & Settings → API keys (test keys start with rzp_test_). */
+    RAZORPAY_KEY_ID: z.string().default(''),
+    RAZORPAY_KEY_SECRET: z.string().default(''),
+    /** Razorpay dashboard → Webhooks: the secret you set for POST /api/v1/webhooks/razorpay. */
+    RAZORPAY_WEBHOOK_SECRET: z.string().default(''),
+    /** Unpaid orders are cancelled (stock released) after this many minutes. */
+    PAYMENT_TIMEOUT_MIN: z.coerce.number().int().min(5).max(1440).default(15),
     HUB_LAT: z.coerce.number().default(18.4866),
     HUB_LNG: z.coerce.number().default(73.8656),
   })
@@ -72,6 +85,9 @@ const schema = z
   })
   .refine((e) => !(e.NODE_ENV === 'production' && e.ALLOW_DEV_LOGIN), {
     message: 'ALLOW_DEV_LOGIN must be false in production',
+  })
+  .refine((e) => e.PAYMENTS_PROVIDER !== 'razorpay' || (!!e.RAZORPAY_KEY_ID && !!e.RAZORPAY_KEY_SECRET), {
+    message: 'RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required when PAYMENTS_PROVIDER is razorpay',
   })
   .refine(
     (e) => e.MESSAGING_PROVIDER !== 'whatsapp' || (!!e.WHATSAPP_TOKEN && !!e.WHATSAPP_PHONE_NUMBER_ID),
