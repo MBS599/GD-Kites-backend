@@ -1,0 +1,425 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  DRIVER
+  ADMIN
+}
+
+enum DriverType {
+  GD
+  EXTERNAL
+}
+
+enum DriverAvailability {
+  AVAILABLE
+  ON_DELIVERY
+  OFFLINE
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  ASSIGNED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum DeliveryStatus {
+  ASSIGNED
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH_ON_DELIVERY
+}
+
+enum InventoryReason {
+  INITIAL
+  ORDER_RESERVED
+  ORDER_RELEASED
+  ADMIN_ADJUSTMENT
+}
+
+model User {
+  id            String         @id @default(uuid())
+  /// Null for accounts created by mobile-number (OTP) sign-in.
+  email         String?        @unique
+  name          String
+  phone         String?
+  /// Mobile number proven by OTP, normalised (919822011122). Used for OTP sign-in.
+  phoneVerified String?        @unique
+  businessName  String?
+  photoUrl      String?
+  googleSub     String?        @unique
+  /// Assigned server-side only. Public Google sign-up always creates CUSTOMER.
+  role          Role           @default(CUSTOMER)
+  isActive      Boolean        @default(true)
+  /// Transactional SMS updates (order status, assignments). User can turn off.
+  smsEnabled    Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  driverProfile DriverProfile?
+  addresses     Address[]
+  cart          Cart?
+  orders        Order[]        @relation("CustomerOrders")
+  refreshTokens RefreshToken[]
+  devices       DeviceToken[]
+
+  @@index([role])
+}
+
+/// Refresh tokens are stored as SHA-256 hashes. Rotation: each use revokes the
+/// token and issues a new one in the same family; reuse of a revoked token
+/// revokes the whole family.
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  familyId   String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+/// Single-row, admin-editable app-wide settings (id is always 1).
+model AppSettings {
+  id                 Int      @id @default(1)
+  /// Upper bound for a service area's radius (the admin slider's max).
+  maxServiceRadiusKm Float    @default(100)
+  updatedAt          DateTime @updatedAt
+}
+
+/// Admin-managed vehicle category with its own driver fare:
+/// fare = baseFare + perKm × road km from hub.
+model VehicleType {
+  id        String          @id @default(uuid())
+  name      String          @unique
+  baseFare  Decimal         @db.Decimal(10, 2)
+  perKm     Decimal         @db.Decimal(10, 2)
+  sortOrder Int             @default(0)
+  isActive  Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  drivers   DriverProfile[]
+}
+
+/// Admin-managed delivery geofence (circle) with its own dispatch hub.
+/// Customers can only save addresses / order inside an active area.
+model ServiceArea {
+  id                 String          @id @default(uuid())
+  name               String          @unique
+  city               String
+  centerLat          Float
+  centerLng          Float
+  radiusKm           Float
+  /// Dispatch hub: distance, delivery charge and driver fare are measured from here.
+  hubName            String
+  hubLat             Float
+  hubLng             Float
+  /// Customer delivery charge = deliveryBaseCharge + deliveryPerKm × km from hub.
+  deliveryBaseCharge Decimal         @default(60) @db.Decimal(10, 2)
+  deliveryPerKm      Decimal         @default(30) @db.Decimal(10, 2)
+  isActive           Boolean         @default(true)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  addresses          Address[]
+  orders             Order[]
+  drivers            DriverProfile[]
+
+  @@index([isActive])
+}
+
+model Address {
+  id            String       @id @default(uuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serviceAreaId String?
+  serviceArea   ServiceArea? @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
+  label         String
+  area          String
+  line          String
+  city          String
+  pincode       String       @db.VarChar(6)
+  lat           Float
+  lng           Float
+  distanceKm    Float
+  contactName   String?
+  contactPhone  String?
+  isDeleted     Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  orders        Order[]
+
+  @@index([userId, isDeleted])
+}
+
+model Category {
+  id        String    @id @default(uuid())
+  /// Stable API identifier, e.g. "fighterKites".
+  slug      String    @unique
+  name      String
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  products  Product[]
+}
+
+model Product {
+  id                String              @id @default(uuid())
+  name              String
+  categoryId        String
+  category          Category            @relation(fields: [categoryId], references: [id])
+  price             Decimal             @db.Decimal(10, 2)
+  unit              String              @default("piece")
+  minOrderQty       Int
+  stock             Int
+  lowStockThreshold Int                 @default(200)
+  description       String              @default("")
+  material          String?
+  size              String?
+  /// Wholesale slab: above slabQty the unit price becomes slabPrice.
+  slabQty           Int?
+  slabPrice         Decimal?            @db.Decimal(10, 2)
+  imageUrl          String?
+  rating            Float?
+  buyerCount        Int                 @default(0)
+  /// Soft delete keeps order history intact.
+  isActive          Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  cartItems         CartItem[]
+  orderItems        OrderItem[]
+  inventoryLog      InventoryMovement[]
+
+  @@index([categoryId, isActive])
+  @@index([isActive, stock])
+}
+
+model InventoryMovement {
+  id         String          @id @default(uuid())
+  productId  String
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  delta      Int
+  stockAfter Int
+  reason     InventoryReason
+  orderId    String?
+  actorId    String?
+  note       String?
+  createdAt  DateTime        @default(now())
+
+  @@index([productId, createdAt])
+}
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String     @unique
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt DateTime   @updatedAt
+  items     CartItem[]
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  qty       Int
+  addedAt   DateTime @default(now())
+
+  @@unique([cartId, productId])
+}
+
+model Order {
+  id              String               @id @default(uuid())
+  number          Int                  @unique @default(autoincrement())
+  customerId      String
+  customer        User                 @relation("CustomerOrders", fields: [customerId], references: [id])
+  addressId       String?
+  address         Address?             @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  serviceAreaId   String?
+  serviceArea     ServiceArea?         @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
+  status          OrderStatus          @default(PENDING)
+  paymentMethod   PaymentMethod        @default(CASH_ON_DELIVERY)
+  subtotal        Decimal              @db.Decimal(12, 2)
+  deliveryCharge  Decimal              @db.Decimal(10, 2)
+  total           Decimal              @db.Decimal(12, 2)
+  // Delivery address snapshot — later edits to saved addresses never change an order.
+  addrLabel       String
+  addrArea        String
+  addrLine        String
+  addrCity        String
+  addrPincode     String
+  addrLat         Float
+  addrLng         Float
+  distanceKm      Float
+  contactName     String
+  contactPhone    String
+  rejectionReason String?
+  placedAt        DateTime             @default(now())
+  deliveredAt     DateTime?
+  updatedAt       DateTime             @updatedAt
+  items           OrderItem[]
+  history         OrderStatusHistory[]
+  delivery        Delivery?
+
+  @@index([customerId, placedAt])
+  @@index([status, placedAt])
+  @@index([serviceAreaId, status])
+  @@index([deliveredAt])
+}
+
+model OrderItem {
+  id          String  @id @default(uuid())
+  orderId     String
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product @relation(fields: [productId], references: [id])
+  /// Snapshots at order time.
+  productName String
+  unit        String
+  qty         Int
+  unitPrice   Decimal @db.Decimal(10, 2)
+  lineTotal   Decimal @db.Decimal(12, 2)
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model OrderStatusHistory {
+  id        String      @id @default(uuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status    OrderStatus
+  note      String?
+  actorId   String?
+  createdAt DateTime    @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+model DriverProfile {
+  id             String             @id @default(uuid())
+  userId         String             @unique
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Area the driver works in; admins can only assign orders from the same area.
+  serviceAreaId  String?
+  serviceArea    ServiceArea?       @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
+  type           DriverType         @default(GD)
+  availability   DriverAvailability @default(AVAILABLE)
+  vehicleNumber  String
+  /// Vehicle category; its rates set this driver's fare unless overridden below.
+  vehicleTypeId  String?
+  vehicleType    VehicleType?       @relation(fields: [vehicleTypeId], references: [id], onDelete: Restrict)
+  /// Per-driver negotiated fare (both set = override the vehicle type's rates).
+  customBaseFare Decimal?           @db.Decimal(10, 2)
+  customPerKm    Decimal?           @db.Decimal(10, 2)
+  hub            String             @default("Katraj hub")
+  lastLat        Float?
+  lastLng        Float?
+  lastLocationAt DateTime?
+  createdAt      DateTime           @default(now())
+  deliveries     Delivery[]
+
+  @@index([availability])
+}
+
+model Delivery {
+  id               String         @id @default(uuid())
+  orderId          String         @unique
+  order            Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  driverId         String
+  driver           DriverProfile  @relation(fields: [driverId], references: [id])
+  status           DeliveryStatus @default(ASSIGNED)
+  fare             Decimal        @db.Decimal(10, 2)
+  assignedAt       DateTime       @default(now())
+  startedAt        DateTime?
+  completedAt      DateTime?
+  /// 4-digit handover code the customer tells the driver (shown to the customer only).
+  otpCode          String?
+  /// Wrong codes entered by the driver (locked after 5).
+  otpAttempts      Int            @default(0)
+  otpLastSentAt    DateTime?
+  /// Code SMS sent (first send + customer resends; capped).
+  otpSentCount     Int            @default(0)
+  otpVerifiedAt    DateTime?
+  proofPhotoUrls   String[]
+  customerReceived Boolean?
+  cashCollected    Boolean?
+
+  @@index([driverId, status])
+  @@index([completedAt])
+}
+
+enum SmsStatus {
+  SENT
+  LOGGED
+  FAILED
+  SKIPPED
+}
+
+/// Audit log of every SMS attempt (never stores anything secret).
+model SmsMessage {
+  id          String    @id @default(uuid())
+  event       String
+  /// 12-digit Indian number, e.g. 919822011122
+  to          String
+  userId      String?
+  orderId     String?
+  body        String
+  status      SmsStatus
+  provider    String
+  providerRef String?
+  error       String?
+  /// Latest delivery report from the gateway (WhatsApp: sent / delivered / read / failed).
+  deliveryStatus String?
+  statusAt    DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([providerRef])
+  @@index([event, to, orderId])
+}
+
+/// One-time passwords sent by SMS (mobile sign-in). Only a hash is stored.
+model OtpChallenge {
+  id         String    @id @default(uuid())
+  /// Normalised mobile, e.g. 919822011122
+  phone      String
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+/// Firebase Cloud Messaging registration of one app install (push notifications).
+model DeviceToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token      String   @unique
+  /// android | ios | web
+  platform   String
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId])
+}

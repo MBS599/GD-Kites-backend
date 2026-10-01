@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+uploads/*
+!uploads/.gitkeep
+
+# whatsapp-web.js login data (never commit)
+.wwebjs_auth/
+.wwebjs_cache/

@@ -1,0 +1,809 @@
+import type { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import type { AddressInfo } from 'node:net';
+import { io, type Socket } from 'socket.io-client';
+import request from 'supertest';
+import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/bootstrap';
+import { GoogleVerifier } from '../src/modules/auth/google-verifier.service';
+import { GeoService } from '../src/modules/geo/geo.service';
+import { OtpGenerator } from '../src/modules/sms/otp';
+import { SmsService } from '../src/modules/sms/sms.service';
+import { PushService } from '../src/modules/sms/push.service';
+import { createHmac } from 'node:crypto';
+import { PrismaService } from '../src/prisma/prisma.service';
+
+const API = '/api/v1';
+
+type Session = { accessToken: string; refreshToken: string; user: { id: string; role: string; driverId: string | null } };
+
+describe('GD Kite Center API (e2e)', () => {
+  let app: INestApplication;
+  let http: ReturnType<typeof request>;
+  let prisma: PrismaService;
+  let baseUrl: string;
+  let customer: Session;
+  let admin: Session;
+  let driver: Session;
+  let otherDriver: Session;
+
+  const login = async (email: string): Promise<Session> =>
+    (await http.post(`${API}/auth/dev-login`).send({ email }).expect(200)).body;
+  const auth = (s: Session) => ({ Authorization: `Bearer ${s.accessToken}` });
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      // Google itself is not reachable in tests; the verifier is the only stub.
+      .overrideProvider(GoogleVerifier)
+      .useValue({
+        verify: async (token: string) => {
+          if (token !== 'valid-google-token-new-user') throw new (await import('@nestjs/common')).UnauthorizedException('bad');
+          return { sub: 'google-sub-123', email: 'new.shop@example.com', name: 'New Shop' };
+        },
+      })
+      // External geocoder stubbed: e2e tests must not depend on the internet.
+      .overrideProvider(GeoService)
+      .useValue({
+        reverse: async () => ({
+          label: 'Marketyard, Mukund Nagar, Pune',
+          full: 'Marketyard, Mukund Nagar, Pune, Maharashtra, 411001, India',
+          area: 'Mukund Nagar',
+          city: 'Pune',
+          pincode: '411001',
+          state: 'Maharashtra',
+        }),
+      })
+      // Predictable one-time codes: login OTP 123456, delivery OTP 1234.
+      .overrideProvider(OtpGenerator)
+      .useValue({ code: (digits: number) => '123456'.slice(0, digits) })
+      .compile();
+    app = moduleRef.createNestApplication<NestExpressApplication>({ rawBody: true });
+    configureApp(app);
+    await app.listen(0);
+    baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
+    http = request(app.getHttpServer());
+    prisma = app.get(PrismaService);
+
+    customer = await login('mayur.traders@gmail.com');
+    admin = await login('admin@gdkitecenter.in');
+    driver = await login('rahul.patil@gdkitecenter.in');
+    otherDriver = await login('suresh.more@gdkitecenter.in');
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  describe('authentication', () => {
+    it('rejects requests without a token', async () => {
+      const res = await http.get(`${API}/orders`).expect(401);
+      expect(res.body.error.code).toBe('unauthorized');
+    });
+
+    it('Google sign-in creates a CUSTOMER — never an elevated role', async () => {
+      const res = await http.post(`${API}/auth/google`).send({ idToken: 'valid-google-token-new-user' }).expect(200);
+      expect(res.body.user.role).toBe('customer');
+      expect(res.body.refreshToken).toBeTruthy();
+      await http.post(`${API}/auth/google`).send({ idToken: 'forged-token-xyz' }).expect(401);
+    });
+
+    it('mobile OTP sign-in: new number becomes a CUSTOMER; code is single-use and never logged', async () => {
+      const cfg = (await http.get(`${API}/auth/config`).expect(200)).body;
+      expect(cfg.otpLogin).toBe(true);
+      await http.post(`${API}/auth/otp/request`).send({ phone: '12345' }).expect(400);
+
+      const phone = '+91 91234 56789';
+      const req = (await http.post(`${API}/auth/otp/request`).send({ phone }).expect(200)).body;
+      expect(req).toMatchObject({ sentTo: '+91 91234 56789', expiresInSec: 300, resendAfterSec: 30 });
+      const again = await http.post(`${API}/auth/otp/request`).send({ phone }).expect(429);
+      expect(again.body.error.details.retryAfterSec).toBeGreaterThan(0);
+
+      const wrong = await http.post(`${API}/auth/otp/verify`).send({ phone, code: '000000' }).expect(400);
+      expect(wrong.body.error.message).toContain('4 attempts left');
+      const needName = await http.post(`${API}/auth/otp/verify`).send({ phone, code: '123456' }).expect(422);
+      expect(needName.body.error.code).toBe('name_required');
+      const s = (await http.post(`${API}/auth/otp/verify`).send({ phone: '9123456789', code: '123456', name: 'Sai Kites' }).expect(200)).body;
+      expect(s.user).toMatchObject({ role: 'customer', name: 'Sai Kites', phone: '+91 91234 56789', email: null });
+      expect(s.refreshToken).toBeTruthy();
+      // Single use.
+      await http.post(`${API}/auth/otp/verify`).send({ phone, code: '123456', name: 'X Y' }).expect(400);
+      // The SMS log never holds the code.
+      const logged = await prisma.smsMessage.findFirstOrThrow({ where: { event: 'loginOtp', to: '919123456789' } });
+      expect(logged.body).not.toContain('123456');
+      expect(logged.body).toContain('••••');
+      // Their number is their sign-in: they can't drop it from the profile.
+      await http.patch(`${API}/users/me`).set({ Authorization: `Bearer ${s.accessToken}` }).send({ phone: '9876543210' }).expect(409);
+    });
+
+    it('mobile OTP signs drivers into their account; admins must use Google', async () => {
+      await prisma.otpChallenge.deleteMany({});
+      await http.post(`${API}/auth/otp/request`).send({ phone: '98220 11122' }).expect(200); // Rahul (driver)
+      const s = (await http.post(`${API}/auth/otp/verify`).send({ phone: '9822011122', code: '123456' }).expect(200)).body;
+      expect(s.user).toMatchObject({ role: 'driver', name: 'Rahul Patil' });
+
+      await prisma.user.update({ where: { email: 'admin@gdkitecenter.in' }, data: { phone: '+91 90000 00001' } });
+      try {
+        await http.post(`${API}/auth/otp/request`).send({ phone: '9000000001' }).expect(200);
+        const res = await http.post(`${API}/auth/otp/verify`).send({ phone: '9000000001', code: '123456' }).expect(403);
+        expect(res.body.error.message).toContain('Google');
+      } finally {
+        await prisma.user.update({ where: { email: 'admin@gdkitecenter.in' }, data: { phone: '+91 20 2426 0000' } });
+      }
+    });
+
+    it('rotates refresh tokens and revokes the family on reuse', async () => {
+      const s = await login('patilkitehouse@gmail.com');
+      const r1 = await http.post(`${API}/auth/refresh`).send({ refreshToken: s.refreshToken }).expect(200);
+      expect(r1.body.refreshToken).not.toBe(s.refreshToken);
+      // Reusing the old token is treated as theft…
+      await http.post(`${API}/auth/refresh`).send({ refreshToken: s.refreshToken }).expect(401);
+      // …and kills the rotated token too.
+      await http.post(`${API}/auth/refresh`).send({ refreshToken: r1.body.refreshToken }).expect(401);
+    });
+
+    it('logout revokes the refresh token', async () => {
+      const s = await login('kitebazaar.hadapsar@gmail.com');
+      await http.post(`${API}/auth/logout`).set(auth(s)).send({ refreshToken: s.refreshToken }).expect(204);
+      await http.post(`${API}/auth/refresh`).send({ refreshToken: s.refreshToken }).expect(401);
+    });
+
+    it('validates payloads and rejects unknown fields', async () => {
+      const res = await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: 'x', qty: 1, price: 1 }).expect(400);
+      expect(res.body.error.code).toBe('bad_request');
+    });
+  });
+
+  describe('role-based access', () => {
+    it.each([
+      ['get', '/admin/dashboard'],
+      ['get', '/reports/sales'],
+      ['get', '/drivers'],
+      ['get', '/inventory'],
+      ['post', '/products'],
+      ['get', '/deliveries'],
+    ])('customer cannot %s %s', async (method, path) => {
+      await (http as any)[method](`${API}${path}`).set(auth(customer)).send({}).expect(403);
+    });
+
+    it('driver cannot use admin or customer APIs', async () => {
+      await http.get(`${API}/admin/dashboard`).set(auth(driver)).expect(403);
+      await http.get(`${API}/cart`).set(auth(driver)).expect(403);
+    });
+  });
+
+  describe('catalogue & cart', () => {
+    it('lists products with search and category filter', async () => {
+      const all = await http.get(`${API}/products`).set(auth(customer)).expect(200);
+      expect(all.body.products.length).toBe(8);
+      const manjha = await http.get(`${API}/products?category=manjha`).set(auth(customer)).expect(200);
+      expect(manjha.body.products.every((p: any) => p.category === 'manjha')).toBe(true);
+      const q = await http.get(`${API}/products?q=tukkal`).set(auth(customer)).expect(200);
+      expect(q.body.products).toHaveLength(1);
+      const cats = await http.get(`${API}/categories`).set(auth(customer)).expect(200);
+      expect(cats.body.categories.map((c: any) => c.slug)).toEqual(['fighterKites', 'designerKites', 'manjha', 'accessories']);
+    });
+
+    it('enforces MOQ and stock in the cart and prices on the server', async () => {
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 10 }).expect(400);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 999999 }).expect(400);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 300 }).expect(201);
+      const cart = await http.patch(`${API}/cart/items/${kite.id}`).set(auth(customer)).send({ qty: 600 }).expect(200);
+      expect(cart.body.cart.items[0].unitPrice).toBe(23); // slab above 500
+      expect(cart.body.cart.subtotal).toBe(600 * 23);
+      const removed = await http.delete(`${API}/cart/items/${kite.id}`).set(auth(customer)).expect(200);
+      expect(removed.body.cart.itemCount).toBe(0);
+    });
+  });
+
+  describe('full order lifecycle across roles', () => {
+    let orderId: string;
+    let kiteId: string;
+    let stockBefore: number;
+    let socket: Socket;
+    const events: string[] = [];
+
+    beforeAll(async () => {
+      socket = io(baseUrl, { transports: ['websocket'], auth: { token: customer.accessToken } });
+      await new Promise<void>((r) => socket.on('connect', () => r()));
+      socket.on('order:updated', (e: any) => events.push(e.order.status));
+    });
+    afterAll(() => socket.close());
+
+    it('places an order from the cart in one transaction', async () => {
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      kiteId = kite.id;
+      stockBefore = kite.stock;
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer)).expect(200)).body.addresses;
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kiteId, qty: 100 }).expect(201);
+
+      const res = await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(201);
+      const order = res.body.order;
+      orderId = order.id;
+      expect(order.status).toBe('pending');
+      expect(order.subtotal).toBe(2500);
+      expect(order.total).toBe(order.subtotal + order.deliveryCharge);
+
+      const after = (await http.get(`${API}/products/${kiteId}`).set(auth(customer))).body.product;
+      expect(after.stock).toBe(stockBefore - 100);
+      const cart = (await http.get(`${API}/cart`).set(auth(customer))).body.cart;
+      expect(cart.itemCount).toBe(0);
+      const moves = await prisma.inventoryMovement.findMany({ where: { orderId } });
+      expect(moves).toHaveLength(1);
+      expect(moves[0].delta).toBe(-100);
+    });
+
+    it('rejects an empty-cart checkout', async () => {
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(400);
+    });
+
+    it('enforces the status machine and driver scoping', async () => {
+      await http.get(`${API}/orders/${orderId}`).set(auth(driver)).expect(404);
+      await http.post(`${API}/orders/${orderId}/assign`).set(auth(admin)).send({ driverId: driver.user.driverId }).expect(409);
+      await http.post(`${API}/orders/${orderId}/confirm`).set(auth(admin)).expect(200);
+      await http.post(`${API}/orders/${orderId}/confirm`).set(auth(admin)).expect(409);
+      const assigned = await http
+        .post(`${API}/orders/${orderId}/assign`)
+        .set(auth(admin))
+        .send({ driverId: driver.user.driverId })
+        .expect(200);
+      expect(assigned.body.order.driver.name).toBe('Rahul Patil');
+      expect(assigned.body.order.driverFare).toBeGreaterThan(0);
+
+      await http.get(`${API}/deliveries/${orderId}`).set(auth(driver)).expect(200);
+      await http.get(`${API}/deliveries/${orderId}`).set(auth(otherDriver)).expect(404);
+      await http.post(`${API}/deliveries/${orderId}/start`).set(auth(otherDriver)).expect(404);
+    });
+
+    it('driver starts, uploads proof and completes the delivery', async () => {
+      await http
+        .post(`${API}/deliveries/${orderId}/complete`)
+        .set(auth(driver))
+        .send({ customerReceived: true, cashCollected: true })
+        .expect(400); // no proof yet
+      await http.post(`${API}/deliveries/${orderId}/start`).set(auth(driver)).expect(200);
+
+      const png = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        'base64',
+      );
+      await http
+        .post(`${API}/deliveries/${orderId}/proof`)
+        .set(auth(driver))
+        .attach('file', Buffer.from('not an image'), { filename: 'x.txt', contentType: 'text/plain' })
+        .expect(400);
+      const up = await http
+        .post(`${API}/deliveries/${orderId}/proof`)
+        .set(auth(driver))
+        .attach('file', png, { filename: 'proof.png', contentType: 'image/png' })
+        .expect(201);
+      expect(up.body.photoUrls).toHaveLength(1);
+
+      const me = (await http.get(`${API}/drivers/me`).set(auth(driver)).expect(200)).body;
+      expect(me.driver.availability).toBe('onDelivery');
+
+      // Delivery OTP: customer (and admin) see it; the driver never does.
+      const mine = (await http.get(`${API}/orders/${orderId}`).set(auth(customer)).expect(200)).body;
+      expect(mine.deliveryOtp).toBe('1234');
+      expect((await http.get(`${API}/orders/${orderId}`).set(auth(admin))).body.deliveryOtp).toBe('1234');
+      expect((await http.get(`${API}/orders/${orderId}`).set(auth(driver))).body.deliveryOtp).toBeNull();
+      expect(JSON.stringify((await http.get(`${API}/deliveries/${orderId}`).set(auth(driver))).body)).not.toContain('1234');
+
+      await http
+        .post(`${API}/deliveries/${orderId}/complete`)
+        .set(auth(driver))
+        .send({ customerReceived: true, cashCollected: true })
+        .expect(400); // OTP missing
+      const wrong = await http
+        .post(`${API}/deliveries/${orderId}/complete`)
+        .set(auth(driver))
+        .send({ customerReceived: true, cashCollected: true, otp: '9999' })
+        .expect(400);
+      expect(wrong.body.error).toMatchObject({ code: 'otp_invalid', message: expect.stringContaining('4 attempts left') });
+
+      const done = await http
+        .post(`${API}/deliveries/${orderId}/complete`)
+        .set(auth(driver))
+        .send({ customerReceived: true, cashCollected: true, otp: '1234' })
+        .expect(200);
+      expect(done.body.order.status).toBe('delivered');
+      expect(done.body.order.proof.photoUrls).toHaveLength(1);
+      expect(done.body.order.history.map((h: any) => h.status)).toEqual([
+        'pending',
+        'confirmed',
+        'assigned',
+        'outForDelivery',
+        'delivered',
+      ]);
+    });
+
+    it('pushed every status change to the customer in realtime', async () => {
+      await new Promise((r) => setTimeout(r, 300));
+      expect(events).toEqual(['pending', 'confirmed', 'assigned', 'outForDelivery', 'delivered']);
+    });
+
+    it('tracking endpoint is scoped to the owner', async () => {
+      const t = await http.get(`${API}/orders/${orderId}/tracking`).set(auth(customer)).expect(200);
+      expect(t.body.status).toBe('delivered');
+      const other = await login('shreeganesh.traders@gmail.com');
+      await http.get(`${API}/orders/${orderId}/tracking`).set(auth(other)).expect(404);
+    });
+  });
+
+  describe('SMS notifications', () => {
+    const smsFor = async (orderId: string) => {
+      await app.get(SmsService).drain();
+      return prisma.smsMessage.findMany({ where: { orderId }, orderBy: { createdAt: 'asc' } });
+    };
+
+    it('texts customer, driver and admins through the order lifecycle (log provider)', async () => {
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(201)).body.order;
+      await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(200);
+      await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: otherDriver.user.driverId }).expect(200);
+      await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: driver.user.driverId }).expect(200);
+      await http.post(`${API}/deliveries/${order.id}/start`).set(auth(driver)).expect(200);
+
+      const sms = await smsFor(order.id);
+      const events = sms.map((m) => m.event);
+      expect(events).toEqual(
+        expect.arrayContaining(['orderPlaced', 'adminNewOrder', 'orderConfirmed', 'driverAssigned', 'deliveryAssigned', 'deliveryRemoved', 'outForDelivery']),
+      );
+      const placed = sms.find((m) => m.event === 'orderPlaced')!;
+      expect(placed.status).toBe('LOGGED');
+      expect(placed.to).toMatch(/^91[6-9]\d{9}$/);
+      expect(placed.body).toContain(order.code);
+      // Admin's seeded phone is a landline: recorded as skipped, never sent.
+      expect(sms.find((m) => m.event === 'adminNewOrder')).toMatchObject({ status: 'SKIPPED' });
+      // Removed driver hears about it, the new one gets the job.
+      const rahul = await prisma.user.findUniqueOrThrow({ where: { email: 'rahul.patil@gdkitecenter.in' } });
+      expect(sms.find((m) => m.event === 'deliveryAssigned' && m.userId === rahul.id)).toBeTruthy();
+
+      // Confirming again is refused, and a duplicate text is never sent.
+      expect(sms.filter((m) => m.event === 'orderConfirmed')).toHaveLength(1);
+    });
+
+    it('delivery OTP: locks after 5 wrong codes; customer resend issues a fresh code', async () => {
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id })).body.order;
+      await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(200);
+      await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: driver.user.driverId }).expect(200);
+      await http.post(`${API}/deliveries/${order.id}/start`).set(auth(driver)).expect(200);
+      const png = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        'base64',
+      );
+      await http.post(`${API}/deliveries/${order.id}/proof`).set(auth(driver)).attach('file', png, { filename: 'p.png', contentType: 'image/png' }).expect(201);
+
+      // Out-for-delivery SMS carries the code, the stored copy does not.
+      const sms = await smsFor(order.id);
+      expect(sms.find((m) => m.event === 'outForDelivery')!.body).toContain('Share OTP ••••');
+
+      // Resend too soon.
+      await http.post(`${API}/orders/${order.id}/delivery-otp/resend`).set(auth(customer)).expect(429);
+      await http.post(`${API}/orders/${order.id}/delivery-otp/resend`).set(auth(driver)).expect(403);
+
+      const complete = (otp: string) =>
+        http.post(`${API}/deliveries/${order.id}/complete`).set(auth(driver)).send({ customerReceived: true, cashCollected: true, otp });
+      for (let i = 0; i < 4; i++) await complete('0000').expect(400);
+      expect((await complete('0000').expect(429)).body.error.code).toBe('otp_locked');
+      expect((await complete('1234').expect(429)).body.error.code).toBe('otp_locked'); // right code no longer accepted
+
+      await prisma.delivery.update({ where: { orderId: order.id }, data: { otpLastSentAt: new Date(Date.now() - 120_000) } });
+      const re = (await http.post(`${API}/orders/${order.id}/delivery-otp/resend`).set(auth(customer)).expect(200)).body;
+      expect(re).toMatchObject({ deliveryOtp: '1234', newCode: true });
+      expect((await smsFor(order.id)).some((m) => m.event === 'deliveryOtp')).toBe(true);
+      await complete('1234').expect(200);
+      expect((await http.get(`${API}/orders/${order.id}`).set(auth(customer))).body.deliveryOtp).toBeNull();
+    });
+
+    it('push: devices register per user; every milestone is pushed, even with messages turned off', async () => {
+      const token = `fcm-token-${Date.now()}-abcdefghijklmnopqrstuvwxyz`;
+      await http.post(`${API}/notifications/devices`).set(auth(customer)).send({ token, platform: 'android' }).expect(204);
+      await http.post(`${API}/notifications/devices`).set(auth(customer)).send({ token: 'short', platform: 'android' }).expect(400);
+      expect(await prisma.deviceToken.count({ where: { token } })).toBe(1);
+
+      const push = app.get(PushService);
+      const sent: { userId: string; type: string; body: string }[] = [];
+      const spy = jest.spyOn(push, 'notifyUser').mockImplementation((userId, m) => {
+        if (m) sent.push({ userId, type: m.data.type, body: m.body });
+      });
+      try {
+        await http.patch(`${API}/users/me`).set(auth(customer)).send({ smsEnabled: false }).expect(200);
+        const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+        const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+        await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+        const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id })).body.order;
+        await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(200);
+        await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: driver.user.driverId }).expect(200);
+        await http.post(`${API}/deliveries/${order.id}/start`).set(auth(driver)).expect(200);
+        await app.get(SmsService).drain();
+
+        const mine = sent.filter((s) => s.userId === customer.user.id).map((s) => s.type);
+        expect(mine).toEqual(expect.arrayContaining(['orderPlaced', 'orderConfirmed', 'driverAssigned', 'outForDelivery']));
+        expect(sent.find((s) => s.type === 'outForDelivery')!.body).toContain('Delivery code: 1234');
+        expect(sent.some((s) => s.type === 'deliveryAssigned' && s.userId === driver.user.id)).toBe(true);
+        expect(sent.some((s) => s.type === 'adminNewOrder' && s.userId === admin.user.id)).toBe(true);
+        // …while no WhatsApp/SMS went to the customer who turned messages off.
+        const msgs = await smsFor(order.id);
+        expect(msgs.filter((m) => m.userId === customer.user.id)).toHaveLength(0);
+      } finally {
+        spy.mockRestore();
+        await http.patch(`${API}/users/me`).set(auth(customer)).send({ smsEnabled: true }).expect(200);
+      }
+
+      await http.delete(`${API}/notifications/devices`).set(auth(customer)).send({ token }).expect(204);
+      expect(await prisma.deviceToken.count({ where: { token } })).toBe(0);
+    });
+
+    it('WhatsApp webhook: verifies Meta, rejects bad signatures, records delivery/read receipts', async () => {
+      const challenge = await http
+        .get(`${API}/webhooks/whatsapp`)
+        .query({ 'hub.mode': 'subscribe', 'hub.verify_token': 'test-verify-token', 'hub.challenge': '12345' })
+        .expect(200);
+      expect(challenge.text).toBe('12345');
+      await http.get(`${API}/webhooks/whatsapp`).query({ 'hub.mode': 'subscribe', 'hub.verify_token': 'wrong', 'hub.challenge': '1' }).expect(400);
+
+      const m = await prisma.smsMessage.create({
+        data: { event: 'test', to: '919822011122', body: 'x', status: 'SENT', provider: 'whatsapp', providerRef: 'wamid.TEST1' },
+      });
+      const payload = JSON.stringify({
+        entry: [{ changes: [{ value: { statuses: [{ id: 'wamid.TEST1', status: 'read', timestamp: '1790000000' }] } }] }],
+      });
+      const sig = (body: string, secret = 'test-app-secret') =>
+        'sha256=' + createHmac('sha256', secret).update(body).digest('hex');
+      await http.post(`${API}/webhooks/whatsapp`).set('content-type', 'application/json').set('x-hub-signature-256', sig(payload, 'nope')).send(payload).expect(400);
+      await http.post(`${API}/webhooks/whatsapp`).set('content-type', 'application/json').set('x-hub-signature-256', sig(payload)).send(payload).expect(200);
+      const after = await prisma.smsMessage.findUniqueOrThrow({ where: { id: m.id } });
+      expect(after.deliveryStatus).toBe('read');
+
+      // Template setup needs WhatsApp credentials on the server.
+      await http.get(`${API}/sms/whatsapp/templates`).set(auth(admin)).expect(503);
+      await http.get(`${API}/sms/whatsapp/templates`).set(auth(customer)).expect(403);
+    });
+
+    it('customers can turn SMS off', async () => {
+      const me = (await http.patch(`${API}/users/me`).set(auth(customer)).send({ smsEnabled: false }).expect(200)).body.user;
+      expect(me.smsEnabled).toBe(false);
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id })).body.order;
+      await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
+      const events = (await smsFor(order.id)).map((m) => m.event);
+      expect(events).not.toContain('orderPlaced');
+      expect(events).not.toContain('orderCancelled');
+      expect(events).toContain('adminNewOrder');
+      await http.patch(`${API}/users/me`).set(auth(customer)).send({ smsEnabled: true }).expect(200);
+    });
+
+    it('admin sees status, the log and can send a test; others cannot', async () => {
+      const status = (await http.get(`${API}/sms/status`).set(auth(admin)).expect(200)).body;
+      expect(status.provider).toBe('log');
+      expect(status).toMatchObject({ channel: 'whatsapp', pushEnabled: false });
+      expect(status.events.find((e: any) => e.event === 'orderPlaced')).toMatchObject({ whatsappTemplate: 'gdk_order_placed', text: expect.stringContaining('GD1037') });
+      const test = (await http.post(`${API}/sms/test`).set(auth(admin)).send({ phone: '98220 11122' }).expect(200)).body;
+      expect(test).toMatchObject({ status: 'logged', to: '919822011122' });
+      const bad = (await http.post(`${API}/sms/test`).set(auth(admin)).send({ phone: '12345' }).expect(200)).body;
+      expect(bad.status).toBe('skipped');
+      const page = (await http.get(`${API}/sms/messages`).set(auth(admin)).query({ limit: 2 }).expect(200)).body;
+      expect(page.messages).toHaveLength(2);
+      expect(page.nextCursor).toBe(page.messages[1].id);
+      await http.get(`${API}/sms/messages`).set(auth(customer)).expect(403);
+      await http.post(`${API}/sms/test`).set(auth(driver)).send({}).expect(403);
+    });
+  });
+
+  describe('cancellation & inventory', () => {
+    it('admin reject returns reserved stock and frees the driver', async () => {
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id })).body.order;
+      await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(200);
+      await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: otherDriver.user.driverId }).expect(200);
+      const rej = await http.post(`${API}/orders/${order.id}/reject`).set(auth(admin)).send({ reason: 'Customer asked' }).expect(200);
+      expect(rej.body.order.status).toBe('cancelled');
+      expect(rej.body.order.driver).toBeNull();
+      const after = (await http.get(`${API}/products/${kite.id}`).set(auth(customer))).body.product;
+      expect(after.stock).toBe(kite.stock);
+      await http.get(`${API}/deliveries/${order.id}`).set(auth(otherDriver)).expect(404);
+    });
+
+    it('customer can cancel only while pending', async () => {
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id })).body.order;
+      await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
+      await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(409);
+    });
+
+    it('admin stock adjustment is atomic and audited', async () => {
+      const tape = (await http.get(`${API}/products?q=tape`).set(auth(admin))).body.products[0];
+      await http.post(`${API}/inventory/${tape.id}/adjust`).set(auth(admin)).send({ delta: -999999, reason: 'Oops' }).expect(400);
+      const res = await http.post(`${API}/inventory/${tape.id}/adjust`).set(auth(admin)).send({ delta: 100, reason: 'Supplier delivery' }).expect(201);
+      expect(res.body.product.stock).toBe(tape.stock + 100);
+      const moves = (await http.get(`${API}/inventory/${tape.id}/movements`).set(auth(admin)).expect(200)).body.movements;
+      expect(moves[0]).toMatchObject({ delta: 100, reason: 'ADMIN_ADJUSTMENT' });
+    });
+  });
+
+  describe('service areas (geofence)', () => {
+    const ahmednagarShop = { lat: 19.09, lng: 74.74 };
+    const addressBody = { label: 'Branch', area: 'Market', line: 'Shop 2, Main Road', pincode: '414001', ...ahmednagarShop };
+    let ahilyanagarId: string;
+
+    it('lists only active areas to customers; admins can see all', async () => {
+      const cust = (await http.get(`${API}/service-areas`).set(auth(customer)).expect(200)).body.serviceAreas;
+      expect(cust.map((a: any) => a.name)).toEqual(['Pune']);
+      const all = (await http.get(`${API}/service-areas?all=true`).set(auth(admin)).expect(200)).body.serviceAreas;
+      expect(all.map((a: any) => a.name).sort()).toEqual(['Ahilyanagar', 'Pune']);
+      ahilyanagarId = all.find((a: any) => a.name === 'Ahilyanagar').id;
+      await http.post(`${API}/service-areas`).set(auth(customer)).send({}).expect(403);
+    });
+
+    it('rejects addresses outside every active area', async () => {
+      const quote = (await http.get(`${API}/addresses/quote?lat=${ahmednagarShop.lat}&lng=${ahmednagarShop.lng}`).set(auth(customer)).expect(200)).body;
+      expect(quote).toMatchObject({ serviceable: false, servedAreas: ['Pune'] });
+      const res = await http.post(`${API}/addresses`).set(auth(customer)).send(addressBody).expect(422);
+      expect(res.body.error.message).toContain('Pune');
+    });
+
+    it('admin switches on a new city; charges use that city’s hub', async () => {
+      await http.patch(`${API}/service-areas/${ahilyanagarId}`).set(auth(admin)).send({ isActive: true }).expect(200);
+      const quote = (await http.get(`${API}/addresses/quote?lat=${ahmednagarShop.lat}&lng=${ahmednagarShop.lng}`).set(auth(customer)).expect(200)).body;
+      expect(quote.serviceable).toBe(true);
+      expect(quote.serviceArea.name).toBe('Ahilyanagar');
+      expect(quote.distanceKm).toBeLessThan(5); // measured from the local hub, not Pune (~120 km)
+      const saved = (await http.post(`${API}/addresses`).set(auth(customer)).send(addressBody).expect(201)).body.address;
+      expect(saved).toMatchObject({ serviceable: true, serviceArea: { name: 'Ahilyanagar' } });
+    });
+
+    it('keeps drivers inside their own area', async () => {
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      const branch = addresses.find((a: any) => a.label === 'Branch');
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: branch.id }).expect(201)).body.order;
+      expect(order.serviceArea.name).toBe('Ahilyanagar');
+      await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(200);
+      const res = await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: driver.user.driverId }).expect(409);
+      expect(res.body.error.message).toContain('different service area');
+      const filtered = (await http.get(`${API}/orders?serviceAreaId=${order.serviceArea.id}`).set(auth(admin)).expect(200)).body.orders;
+      expect(filtered.every((o: any) => o.serviceArea.name === 'Ahilyanagar')).toBe(true);
+    });
+
+    it('admin sets the max radius (default 100 km) and areas must respect it', async () => {
+      await http.get(`${API}/settings`).set(auth(customer)).expect(403);
+      const s = (await http.get(`${API}/settings`).set(auth(admin)).expect(200)).body.settings;
+      expect(s.maxServiceRadiusKm).toBe(100);
+      const body = { name: 'Nashik', city: 'Nashik', centerLat: 19.9975, centerLng: 73.7898, radiusKm: 150, isActive: false };
+      const tooBig = await http.post(`${API}/service-areas`).set(auth(admin)).send(body).expect(400);
+      expect(tooBig.body.error.message).toContain('100 km');
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ maxServiceRadiusKm: 150 }).expect(200);
+      await http.post(`${API}/service-areas`).set(auth(admin)).send(body).expect(201);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ maxServiceRadiusKm: 100 }).expect(200);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ maxServiceRadiusKm: 5000 }).expect(400);
+    });
+
+    it('delivery charge = area rates; driver fare = the assigned driver’s vehicle/custom rates', async () => {
+      const all = (await http.get(`${API}/service-areas?all=true`).set(auth(admin))).body.serviceAreas;
+      const pune = all.find((a: any) => a.name === 'Pune');
+      expect(pune.rates).toEqual({ deliveryBaseCharge: 60, deliveryPerKm: 30 });
+      await http
+        .patch(`${API}/service-areas/${pune.id}`)
+        .set(auth(admin))
+        .send({ deliveryBaseCharge: 100, deliveryPerKm: 10 })
+        .expect(200);
+      // Area-level driver rates no longer exist.
+      await http.patch(`${API}/service-areas/${pune.id}`).set(auth(admin)).send({ driverBaseFare: 50 }).expect(400);
+
+      const q = (await http.get(`${API}/addresses/quote?lat=18.4529&lng=73.8652`).set(auth(customer)).expect(200)).body;
+      expect(q.deliveryCharge).toBe(Math.round(100 + 10 * q.distanceKm));
+
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      const shop = addresses.find((a: any) => a.serviceArea?.name === 'Pune');
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: shop.id }).expect(201)).body.order;
+      expect(order.deliveryCharge).toBe(Math.round(100 + 10 * order.address.distanceKm));
+      await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(200);
+      const assigned = (
+        await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: otherDriver.user.driverId }).expect(200)
+      ).body.order;
+      // Suresh drives a Tempo: ₹150 + ₹25/km.
+      expect(assigned.driver.vehicleType.name).toBe('Tempo');
+      expect(assigned.driverFare).toBe(Math.round(150 + 25 * order.address.distanceKm));
+
+      // Re-assign to Rahul (Bike ₹40 + ₹13/km): the fare follows the driver.
+      const bikeFare = (
+        await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: driver.user.driverId }).expect(200)
+      ).body.order.driverFare;
+      expect(bikeFare).toBe(Math.round(40 + 13 * order.address.distanceKm));
+
+      // Changing rates later never rewrites placed orders.
+      await http.patch(`${API}/service-areas/${pune.id}`).set(auth(admin)).send({ deliveryBaseCharge: 60, deliveryPerKm: 30 }).expect(200);
+      const types = (await http.get(`${API}/vehicle-types`).set(auth(admin)).expect(200)).body.vehicleTypes;
+      const bikeType = types.find((t: any) => t.name === 'Bike');
+      await http.patch(`${API}/vehicle-types/${bikeType.id}`).set(auth(admin)).send({ perKm: 99 }).expect(200);
+      const again = (await http.get(`${API}/orders/${order.id}`).set(auth(admin))).body.order;
+      expect(again.deliveryCharge).toBe(order.deliveryCharge);
+      expect(again.driverFare).toBe(bikeFare);
+      await http.patch(`${API}/vehicle-types/${bikeType.id}`).set(auth(admin)).send({ perKm: 13 }).expect(200);
+      await http.post(`${API}/orders/${order.id}/reject`).set(auth(admin)).send({ reason: 'Test cleanup' }).expect(200);
+
+      await http.patch(`${API}/service-areas/${pune.id}`).set(auth(admin)).send({ deliveryPerKm: -1 }).expect(400);
+    });
+
+    it('switching an area off blocks new checkouts there but keeps the address', async () => {
+      await http.patch(`${API}/service-areas/${ahilyanagarId}`).set(auth(admin)).send({ isActive: false }).expect(200);
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      const branch = addresses.find((a: any) => a.label === 'Branch');
+      expect(branch.serviceable).toBe(false);
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+      await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: branch.id }).expect(422);
+      await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
+    });
+  });
+
+  describe('driver route', () => {
+    it('returns the driver’s open deliveries in an optimised order with totals', async () => {
+      await http.get(`${API}/deliveries/route`).set(auth(customer)).expect(403);
+      const res = await http.get(`${API}/deliveries/route`).set(auth(driver)).expect(200);
+      const r = res.body;
+      expect(['driver', 'hub']).toContain(r.origin.source);
+      expect(r.stops.length).toBeGreaterThan(0);
+      expect(r.stops.map((s: any) => s.sequence)).toEqual(r.stops.map((_: any, i: number) => i + 1));
+      expect(r.stops.every((s: any) => ['assigned', 'outForDelivery'].includes(s.order.status))).toBe(true);
+      expect(r.totalFare).toBeCloseTo(r.stops.reduce((sum: number, s: any) => sum + s.order.driverFare, 0));
+      expect(r.geometry.length).toBeGreaterThanOrEqual(2);
+      // Arrival times are cumulative.
+      for (let i = 1; i < r.stops.length; i++) expect(r.stops[i].arrivalMinutes).toBeGreaterThanOrEqual(r.stops[i - 1].arrivalMinutes);
+    });
+  });
+
+  describe('vehicle types & per-driver fares', () => {
+    it('only admins manage vehicle types', async () => {
+      await http.get(`${API}/vehicle-types`).set(auth(customer)).expect(403);
+      await http.get(`${API}/vehicle-types`).set(auth(driver)).expect(403);
+      const res = await http.post(`${API}/vehicle-types`).set(auth(admin)).send({ name: 'Mini truck', baseFare: 250, perKm: 32 }).expect(201);
+      expect(res.body.vehicleType).toMatchObject({ name: 'Mini truck', baseFare: 250, perKm: 32 });
+      await http.post(`${API}/vehicle-types`).set(auth(admin)).send({ name: 'Bad', baseFare: -1, perKm: 2 }).expect(400);
+    });
+
+    it('custom driver fare overrides the vehicle rate and can be cleared', async () => {
+      const id = driver.user.driverId;
+      await http.patch(`${API}/drivers/${id}`).set(auth(admin)).send({ customBaseFare: 55 }).expect(400); // needs both
+      const custom = (await http.patch(`${API}/drivers/${id}`).set(auth(admin)).send({ customBaseFare: 55, customPerKm: 11.5 }).expect(200)).body.driver;
+      expect(custom.fare).toEqual({ baseFare: 55, perKm: 11.5, source: 'custom' });
+      const cleared = (await http.patch(`${API}/drivers/${id}`).set(auth(admin)).send({ customBaseFare: null, customPerKm: null }).expect(200)).body.driver;
+      expect(cleared.fare).toMatchObject({ baseFare: 40, perKm: 13, source: 'vehicle' });
+      expect(cleared.vehicleType.name).toBe('Bike');
+    });
+
+    it('amit (external) uses his negotiated rate', async () => {
+      const drivers = (await http.get(`${API}/drivers`).set(auth(admin))).body.drivers;
+      const amit = drivers.find((d: any) => d.name === 'Amit Jadhav');
+      expect(amit.fare).toEqual({ baseFare: 60, perKm: 16, source: 'custom' });
+      expect(amit.vehicleType.name).toBe('Auto rickshaw');
+    });
+  });
+
+  describe('reverse geocoding', () => {
+    it('returns an address for a point; requires auth and valid coordinates', async () => {
+      await http.get(`${API}/geo/reverse?lat=18.48&lng=73.86`).expect(401);
+      await http.get(`${API}/geo/reverse?lat=200&lng=73.86`).set(auth(admin)).expect(400);
+      const res = await http.get(`${API}/geo/reverse?lat=18.4866&lng=73.8656`).set(auth(customer)).expect(200);
+      expect(res.body.place).toMatchObject({ label: 'Marketyard, Mukund Nagar, Pune', pincode: '411001' });
+    });
+  });
+
+  describe('admin management', () => {
+    it('creates, updates and soft-deletes a product', async () => {
+      const created = await http
+        .post(`${API}/products`)
+        .set(auth(admin))
+        .send({ name: 'Test Kite', category: 'fighterKites', price: 30, minOrderQty: 10, stock: 100, slabQty: 100, slabPrice: 28 })
+        .expect(201);
+      const id = created.body.product.id;
+      await http.patch(`${API}/products/${id}`).set(auth(admin)).send({ slabPrice: 35 }).expect(400); // must be below price
+      const upd = await http.patch(`${API}/products/${id}`).set(auth(admin)).send({ price: 32, stock: 150 }).expect(200);
+      expect(upd.body.product).toMatchObject({ price: 32, stock: 150 });
+      await http.delete(`${API}/products/${id}`).set(auth(admin)).expect(204);
+      await http.get(`${API}/products/${id}`).set(auth(customer)).expect(404);
+    });
+
+    it('pages orders, products and drivers with a stable cursor', async () => {
+      const all = (await http.get(`${API}/orders`).set(auth(admin)).query({ limit: 100 }).expect(200)).body;
+      expect(all.nextCursor).toBeNull();
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = (await http.get(`${API}/orders`).set(auth(admin)).query({ limit: 2, ...(cursor ? { cursor } : {}) }).expect(200)).body;
+        expect(page.orders.length).toBeLessThanOrEqual(2);
+        seen.push(...page.orders.map((o: any) => o.id));
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      expect(seen).toEqual(all.orders.map((o: any) => o.id)); // same order, no gaps or duplicates
+
+      const p1 = (await http.get(`${API}/products`).set(auth(customer)).query({ limit: 1 }).expect(200)).body;
+      expect(p1.products).toHaveLength(1);
+      const p2 = (await http.get(`${API}/products`).set(auth(customer)).query({ limit: 1, cursor: p1.nextCursor }).expect(200)).body;
+      expect(p2.products[0].id).not.toBe(p1.products[0].id);
+
+      const d1 = (await http.get(`${API}/drivers`).set(auth(admin)).query({ limit: 2 }).expect(200)).body;
+      expect(d1.drivers).toHaveLength(2);
+      expect(d1.nextCursor).toBe(d1.drivers[1].id);
+      await http.get(`${API}/orders`).set(auth(admin)).query({ limit: 500 }).expect(400);
+      await http.get(`${API}/orders`).set(auth(admin)).query({ cursor: 'nope' }).expect(400);
+    });
+
+    it('driver detail: open orders + true totals; history pages by driverId', async () => {
+      const rahulId = (await http.get(`${API}/drivers/me`).set(auth(driver)).expect(200)).body.driver.id;
+      const d = (await http.get(`${API}/drivers/${rahulId}`).set(auth(admin)).expect(200)).body;
+      expect(d.orders.every((o: any) => ['assigned', 'outForDelivery'].includes(o.status))).toBe(true);
+
+      const history: any[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = (
+          await http
+            .get(`${API}/orders`)
+            .set(auth(admin))
+            .query({ driverId: rahulId, status: 'delivered', limit: 2, ...(cursor ? { cursor } : {}) })
+            .expect(200)
+        ).body;
+        history.push(...page.orders);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      expect(history.length).toBe(d.totals.completedDeliveries);
+      expect(history.every((o) => o.status === 'delivered' && o.driver.id === rahulId)).toBe(true);
+      expect(d.totals.totalFares).toBe(history.reduce((s, o) => s + o.driverFare, 0));
+      await http.get(`${API}/orders`).set(auth(admin)).query({ driverId: 'x' }).expect(400);
+    });
+
+    it('tracks driver location only while on duty; admins see it', async () => {
+      await http.patch(`${API}/drivers/me/availability`).set(auth(otherDriver)).send({ availability: 'available' }).expect(200);
+      await http.post(`${API}/drivers/me/location`).set(auth(otherDriver)).send({ lat: 18.51, lng: 73.86 }).expect(200);
+      const list = (await http.get(`${API}/drivers`).set(auth(admin)).expect(200)).body.drivers;
+      const suresh = list.find((d: any) => d.name.startsWith('Suresh'));
+      expect(suresh.lastLocation).toMatchObject({ lat: 18.51, lng: 73.86 });
+
+      await http.patch(`${API}/drivers/me/availability`).set(auth(otherDriver)).send({ availability: 'offline' }).expect(200);
+      await http.post(`${API}/drivers/me/location`).set(auth(otherDriver)).send({ lat: 18.6, lng: 73.9 }).expect(409);
+      await http.post(`${API}/drivers/me/location`).set(auth(customer)).send({ lat: 18.6, lng: 73.9 }).expect(403);
+      await http.patch(`${API}/drivers/me/availability`).set(auth(otherDriver)).send({ availability: 'available' }).expect(200);
+    });
+
+    it('registers a driver who then gets the DRIVER role', async () => {
+      const res = await http
+        .post(`${API}/drivers`)
+        .set(auth(admin))
+        .send({ name: 'Vikas Shinde', email: 'vikas@example.com', phone: '+91 90000 11111', type: 'external', vehicleNumber: 'mh12 ab 1234' })
+        .expect(201);
+      expect(res.body.driver.vehicleNumber).toBe('MH12 AB 1234');
+      const s = await login('vikas@example.com');
+      expect(s.user.role).toBe('driver');
+    });
+
+    it('dashboard and reports return numbers', async () => {
+      const d = (await http.get(`${API}/admin/dashboard`).set(auth(admin)).expect(200)).body.stats;
+      expect(d.completedToday).toBeGreaterThanOrEqual(1);
+      const sales = (await http.get(`${API}/reports/sales`).set(auth(admin)).expect(200)).body;
+      expect(sales.totals.orders).toBeGreaterThan(0);
+      const top = (await http.get(`${API}/reports/products`).set(auth(admin)).expect(200)).body.products;
+      expect(top[0].qty).toBeGreaterThan(0);
+      const drivers = (await http.get(`${API}/reports/drivers`).set(auth(admin)).expect(200)).body.drivers;
+      expect(drivers.find((x: any) => x.name === 'Rahul Patil').deliveries).toBeGreaterThanOrEqual(1);
+    });
+  });
+});

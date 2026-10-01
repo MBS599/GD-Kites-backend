@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gdkite
+      POSTGRES_PASSWORD: gdkite
+      POSTGRES_DB: gdkite
+    ports:
+      - "5433:5432"
+    volumes:
+      - gdkite-db:/var/lib/postgresql/data
+
+volumes:
+  gdkite-db:
