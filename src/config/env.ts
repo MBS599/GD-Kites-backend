@@ -42,6 +42,11 @@ const schema = z
      * only writes them to the server log. Push notifications are separate (FIREBASE_SERVICE_ACCOUNT).
      */
     MESSAGING_PROVIDER: z.enum(['log', 'whatsapp', 'wwebjs']).default('log'),
+    /**
+     * Testing safety net: when set (comma-separated mobiles), WhatsApp only goes
+     * to these numbers; everyone else is logged as skipped. Leave empty in production.
+     */
+    MESSAGING_ALLOWLIST: csv,
     /** wwebjs (linked phone, unofficial): where the WhatsApp Web login is kept, and the minimum gap between sends. */
     WWEBJS_SESSION_DIR: z.string().default('.wwebjs_auth'),
     WWEBJS_MIN_GAP_MS: z.coerce.number().int().min(0).default(3000),

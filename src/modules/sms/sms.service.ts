@@ -31,6 +31,8 @@ export class SmsService {
   private readonly logger = new Logger(SmsService.name);
   readonly provider: SmsProvider;
   private queue: Promise<void> = Promise.resolve();
+  /** Testing: only these numbers get messages (empty = everyone). */
+  private readonly allowlist: Set<string>;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -53,6 +55,12 @@ export class SmsService {
           return new LogSmsProvider((line) => this.logger.log(line));
       }
     })();
+    this.allowlist = new Set(
+      config
+        .get('MESSAGING_ALLOWLIST')
+        .map((n) => normalizeIndianMobile(n))
+        .filter((n): n is string => !!n),
+    );
   }
 
   /** Setup overview for the admin Settings screen (no secrets). */
@@ -60,6 +68,7 @@ export class SmsService {
     return {
       provider: this.provider.name,
       live: this.provider.name !== 'log',
+      allowlist: [...this.allowlist],
       pushEnabled: this.pushService.enabled,
       events: SMS_EVENTS.map((event) => ({ event })),
     };
@@ -210,6 +219,9 @@ export class SmsService {
   }
 
   private async process(job: Job, opts: { dedupe: boolean }) {
+    if (this.allowlist.size && !this.allowlist.has(job.to)) {
+      return this.record(job, 'SKIPPED', 'Testing allowlist: number not in MESSAGING_ALLOWLIST');
+    }
     const vars = job.vars.map(clipVar);
     const text = this.render(job.event, vars);
     // What we store: one-time codes masked.
