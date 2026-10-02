@@ -20,10 +20,6 @@ const schema = z
     JWT_ACCESS_TTL: z.string().default('15m'),
     JWT_REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(30),
     GOOGLE_CLIENT_ID: csv,
-    ALLOW_DEV_LOGIN: z
-      .string()
-      .default('false')
-      .transform((v) => v === 'true'),
     BOOTSTRAP_ADMIN_EMAILS: csv.transform((l) => l.map((e) => e.toLowerCase())),
     PUBLIC_BASE_URL: z.string().default('http://localhost:3000'),
     CORS_ORIGINS: z.string().default('*'),
@@ -31,7 +27,7 @@ const schema = z
     GOOGLE_MAPS_API_KEY: z.string().default(''),
     NOMINATIM_URL: z.string().default('https://nominatim.openstreetmap.org'),
     /** Nominatim policy requires an identifying User-Agent with contact info. */
-    GEOCODER_USER_AGENT: z.string().default('GDKiteCenter/1.0 (support@gdkitecenter.in)'),
+    GEOCODER_USER_AGENT: z.string().default('GDKites/1.0 (+https://gdkites.in)'),
     /** Road routing / trip optimisation. `osrm` now; `google` reserved for the Routes API later. */
     ROUTING_PROVIDER: z.enum(['osrm']).default('osrm'),
     OSRM_URL: z.string().default('https://router.project-osrm.org'),
@@ -82,9 +78,6 @@ const schema = z
   })
   .refine((e) => e.JWT_ACCESS_SECRET !== e.JWT_REFRESH_SECRET, {
     message: 'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ',
-  })
-  .refine((e) => !(e.NODE_ENV === 'production' && e.ALLOW_DEV_LOGIN), {
-    message: 'ALLOW_DEV_LOGIN must be false in production',
   })
   .refine((e) => e.PAYMENTS_PROVIDER !== 'razorpay' || (!!e.RAZORPAY_KEY_ID && !!e.RAZORPAY_KEY_SECRET), {
     message: 'RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required when PAYMENTS_PROVIDER is razorpay',

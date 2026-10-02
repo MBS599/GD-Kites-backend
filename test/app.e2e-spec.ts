@@ -6,6 +6,7 @@ import { io, type Socket } from 'socket.io-client';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/bootstrap';
+import { AuthService } from '../src/modules/auth/auth.service';
 import { GoogleVerifier } from '../src/modules/auth/google-verifier.service';
 import { GeoService } from '../src/modules/geo/geo.service';
 import { OtpGenerator } from '../src/modules/sms/otp';
@@ -30,8 +31,12 @@ describe('GD Kite Center API (e2e)', () => {
   let driver: Session;
   let otherDriver: Session;
 
-  const login = async (email: string): Promise<Session> =>
-    (await http.post(`${API}/auth/dev-login`).send({ email }).expect(200)).body;
+  // The API has no password-less sign-in: sessions for seeded accounts are started in-process.
+  const login = async (email: string): Promise<Session> => {
+    const user = await prisma.user.findUniqueOrThrow({ where: { email }, include: { driverProfile: true } });
+    const { refreshTokenId: _, ...session } = await app.get(AuthService).startSession(user);
+    return session;
+  };
   const auth = (s: Session) => ({ Authorization: `Bearer ${s.accessToken}` });
 
   beforeAll(async () => {
@@ -88,6 +93,13 @@ describe('GD Kite Center API (e2e)', () => {
       expect(res.body.user.role).toBe('customer');
       expect(res.body.refreshToken).toBeTruthy();
       await http.post(`${API}/auth/google`).send({ idToken: 'forged-token-xyz' }).expect(401);
+    });
+
+    it('shows a shop contact number only while a phone is linked to WhatsApp', async () => {
+      // Tests run with MESSAGING_PROVIDER=log: no linked phone, so no number — even if one was saved earlier.
+      await prisma.appSettings.upsert({ where: { id: 1 }, create: { id: 1, whatsappNumber: '919000000001' }, update: { whatsappNumber: '919000000001' } });
+      expect((await http.get(`${API}/auth/config`).expect(200)).body.supportPhone).toBeNull();
+      await prisma.appSettings.update({ where: { id: 1 }, data: { whatsappNumber: null } });
     });
 
     it('mobile OTP sign-in: new number becomes a CUSTOMER; code is single-use and never logged', async () => {
@@ -1024,6 +1036,45 @@ describe('GD Kite Center API (e2e)', () => {
       expect(top[0].qty).toBeGreaterThan(0);
       const drivers = (await http.get(`${API}/reports/drivers`).set(auth(admin)).expect(200)).body.drivers;
       expect(drivers.find((x: any) => x.name === 'Rahul Patil').deliveries).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('account deletion', () => {
+    it('is for customers only', async () => {
+      await http.delete(`${API}/users/me`).set(auth(driver)).expect(403);
+      await http.delete(`${API}/users/me`).set(auth(admin)).expect(403);
+    });
+
+    it('is refused while the customer has orders in progress', async () => {
+      const open = await prisma.order.findFirstOrThrow({
+        where: { status: { in: ['PENDING', 'CONFIRMED', 'ASSIGNED', 'OUT_FOR_DELIVERY'] }, customer: { email: { not: null } } },
+        include: { customer: true },
+      });
+      const s = await login(open.customer.email!);
+      await http.delete(`${API}/users/me`).set(auth(s)).expect(409);
+    });
+
+    it('erases personal data, ends every session and frees the Google identity', async () => {
+      const s = (await http.post(`${API}/auth/google`).send({ idToken: 'valid-google-token-new-user' }).expect(200)).body;
+      await prisma.order.updateMany({
+        where: { customerId: s.user.id, status: { notIn: ['DELIVERED', 'CANCELLED'] } },
+        data: { status: 'CANCELLED' },
+      });
+
+      await http.delete(`${API}/users/me`).set(auth(s)).expect(204);
+
+      const gone = await prisma.user.findUniqueOrThrow({ where: { id: s.user.id } });
+      expect(gone).toMatchObject({ name: 'Deleted user', email: null, phone: null, googleSub: null, isActive: false });
+      expect(await prisma.address.count({ where: { userId: s.user.id } })).toBe(0);
+      expect(await prisma.refreshToken.count({ where: { userId: s.user.id } })).toBe(0);
+      expect(await prisma.smsMessage.count({ where: { userId: s.user.id } })).toBe(0);
+      await http.get(`${API}/auth/me`).set(auth(s)).expect(401);
+      await http.post(`${API}/auth/refresh`).send({ refreshToken: s.refreshToken }).expect(401);
+
+      // Signing in with the same Google account again starts a fresh customer account.
+      const again = (await http.post(`${API}/auth/google`).send({ idToken: 'valid-google-token-new-user' }).expect(200)).body;
+      expect(again.user.id).not.toBe(s.user.id);
+      expect(again.user.role).toBe('customer');
     });
   });
 });

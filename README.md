@@ -9,7 +9,7 @@ docker compose up -d                 # Postgres 16 on localhost:5433
 cp .env.example .env                 # fill JWT_ACCESS_SECRET / JWT_REFRESH_SECRET (≥32 chars, different)
 npm install
 npx prisma migrate deploy
-npm run db:seed                      # wipes + recreates sample data (refuses NODE_ENV=production)
+npm run db:seed                      # optional local sample data; wipes the DB (refuses NODE_ENV=production)
 npm run dev                          # http://localhost:3000/api/v1
 ```
 
@@ -19,12 +19,12 @@ npm run dev                          # http://localhost:3000/api/v1
 src/
   main.ts, bootstrap.ts        global prefix, helmet, CORS, ValidationPipe (whitelist + forbid unknown), Swagger, /uploads static
   app.module.ts                global guards: Throttler → JwtAuthGuard → RolesGuard; global error filter
-  config/                      zod-validated env (fails fast; refuses dev-login in production)
+  config/                      zod-validated env (fails fast)
   prisma/                      PrismaService (+ tx helper)
   common/                      auth decorators/guards, error envelope, serializers (API contract), pricing, uploads
   domain/                      pure rules: order state machine, pricing, geo (unit-tested)
   modules/
-    auth/        Google ID-token sign-in, mobile OTP sign-in, refresh rotation, logout, dev-login
+    auth/        Google ID-token sign-in, mobile OTP sign-in, refresh rotation, logout
     users/       profile
     addresses/   saved addresses + delivery quote
     catalog/     categories, products, inventory (atomic adjustments + audit log), image uploads
@@ -95,8 +95,9 @@ Messages go out on **WhatsApp** — from a linked phone via whatsapp-web.js (cho
 **WhatsApp from a linked phone — whatsapp-web.js** (`MESSAGING_PROVIDER=wwebjs`, the chosen setup; free):
 1. Set `MESSAGING_PROVIDER=wwebjs` and restart. The server starts WhatsApp Web in headless Chromium (installed with the `puppeteer` dependency).
 2. Admin → Settings → WhatsApp & notifications shows a **QR code**. On the business phone: WhatsApp → Settings → Linked devices → Link a device → scan. The login is saved in `WWEBJS_SESSION_DIR` (default `.wwebjs_auth`, git-ignored), so restarts don't need a new scan. Keep the phone online.
-3. Messages are plain text (the WhatsApp wording from `whatsapp.templates.ts`), sent one at a time at least `WWEBJS_MIN_GAP_MS` apart (default 3 s, plus random jitter), only to numbers that are on WhatsApp. Delivered / read ticks come back from the phone and show in the admin log. "Unlink phone" / "Reconnect" are on the same screen.
-4. **Unofficial**: automating WhatsApp Web is against WhatsApp's terms and the number can be banned without notice. Use a dedicated number. Server needs ~300 MB RAM for Chromium; on Linux, Chromium's system libraries must be installed.
+3. The linked number becomes the shop's public contact number (`GET /auth/config` → `supportPhone`, shown in the app and on the legal pages). It is cleared when the phone is unlinked; with no linked phone no number is shown.
+4. Messages are plain text (the WhatsApp wording from `whatsapp.templates.ts`), sent one at a time at least `WWEBJS_MIN_GAP_MS` apart (default 3 s, plus random jitter), only to numbers that are on WhatsApp. Delivered / read ticks come back from the phone and show in the admin log. "Unlink phone" / "Reconnect" are on the same screen.
+5. **Unofficial**: automating WhatsApp Web is against WhatsApp's terms and the number can be banned without notice. Use a dedicated number. Server needs ~300 MB RAM for Chromium; on Linux, Chromium's system libraries must be installed.
 
 **Official WhatsApp Cloud API** (alternative, `MESSAGING_PROVIDER=whatsapp`; default `log` only writes messages to the server log):
 1. business.facebook.com → Meta Business account → add a WhatsApp Business account with a dedicated number (not already on the WhatsApp app). Submit business verification (GST) to lift the ~250 new contacts/day limit.
@@ -151,7 +152,7 @@ Drivers collect `dueOnDelivery` (the items) in cash.
 
 | Area | Endpoints | Role |
 |---|---|---|
-| Auth | `POST auth/google`, `POST auth/refresh`, `POST auth/logout`, `GET auth/me`, `GET auth/config`, `POST auth/dev-login` (dev only) | public / any |
+| Auth | `POST auth/google`, `POST auth/refresh`, `POST auth/logout`, `GET auth/me`, `GET auth/config` | public / any |
 | Users | `GET/PATCH users/me` | any |
 | Addresses | `GET/POST addresses`, `DELETE addresses/:id`, `GET addresses/quote?lat&lng` | customer |
 | Catalogue | `GET categories`, `GET products?q&category`, `GET products/:id` | any |
@@ -185,4 +186,4 @@ npm run test:e2e         # 33 API tests against an isolated `gdkite_test` databa
 
 ## Production checklist
 
-`NODE_ENV=production`, strong distinct JWT secrets, `ALLOW_DEV_LOGIN=false`, real `GOOGLE_CLIENT_ID`s, restricted `CORS_ORIGINS`, HTTPS in front, `npx prisma migrate deploy` on release, uploads moved to object storage (S3/GCS) for multi-instance deployments.
+`NODE_ENV=production`, strong distinct JWT secrets, real `GOOGLE_CLIENT_ID`s, restricted `CORS_ORIGINS`, HTTPS in front, `npx prisma migrate deploy` on release, uploads moved to object storage (S3/GCS) for multi-instance deployments.

@@ -1,7 +1,7 @@
 /**
  * Development sample data. Wipes and recreates everything — never run against production.
  *
- * Accounts (sign in with POST /api/v1/auth/dev-login when ALLOW_DEV_LOGIN=true):
+ * Accounts (used by the e2e tests and the Flutter API integration test):
  *   admin@gdkitecenter.in        ADMIN
  *   rahul.patil@gdkitecenter.in  DRIVER (GD)
  *   amit.jadhav@gmail.com        DRIVER (External)

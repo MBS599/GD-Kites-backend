@@ -16,6 +16,12 @@ export class SettingsService {
   get() {
     return this.prisma.appSettings.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
   }
+
+  /** The WhatsApp-linked business number as +91…, or null when no phone is linked. */
+  async contactNumber(): Promise<string | null> {
+    const s = await this.prisma.appSettings.findUnique({ where: { id: 1 }, select: { whatsappNumber: true } });
+    return s?.whatsappNumber ? `+${s.whatsappNumber}` : null;
+  }
 }
 
 export class UpdateSettingsDto {

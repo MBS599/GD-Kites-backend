@@ -7,3 +7,6 @@ uploads/*
 # whatsapp-web.js login data (never commit)
 .wwebjs_auth/
 .wwebjs_cache/
+
+# Flutter integration-test sessions (contain live tokens)
+it-sessions.json

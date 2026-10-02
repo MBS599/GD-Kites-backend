@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { Role } from '@prisma/client';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -22,16 +22,6 @@ export class AuthService {
   async signInWithGoogle(idToken: string, userAgent?: string) {
     const identity = await this.google.verify(idToken);
     const user = await this.upsertFromGoogle(identity);
-    return this.issueSession(user, randomUUID(), userAgent);
-  }
-
-  /** Development only — caller must check `devLoginEnabled`. */
-  async devLogin(email: string, userAgent?: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-      include: { driverProfile: true },
-    });
-    if (!user || !user.isActive) throw new NotFoundException('Account not found.');
     return this.issueSession(user, randomUUID(), userAgent);
   }
 

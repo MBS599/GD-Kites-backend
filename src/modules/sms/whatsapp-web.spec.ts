@@ -32,7 +32,12 @@ class FakeClient extends EventEmitter implements WebClient {
 const config = (over: Record<string, unknown> = {}) =>
   ({ get: (k: string) => ({ MESSAGING_PROVIDER: 'wwebjs', WWEBJS_SESSION_DIR: '.x', WWEBJS_MIN_GAP_MS: 50, ...over })[k] }) as any;
 
-function session(prisma: any = { smsMessage: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) } }) {
+const fakePrisma = () => ({
+  smsMessage: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+  appSettings: { upsert: jest.fn().mockResolvedValue({}) },
+});
+
+function session(prisma: any = fakePrisma()) {
   const fake = new FakeClient();
   const s = new (class extends WhatsAppWebSession {
     protected async createClient() {
@@ -126,6 +131,34 @@ describe('WhatsApp Web (linked phone)', () => {
     expect(prisma.smsMessage.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ providerRef: 'msg-7' }), data: expect.objectContaining({ deliveryStatus: 'read' }) }),
     );
+  });
+
+  it('saves the linked number as the contact number, and clears it when the phone is unlinked', async () => {
+    const { s, fake, prisma } = session();
+    await s.start();
+    fake.emit('ready');
+    await new Promise((r) => setImmediate(r));
+    expect(prisma.appSettings.upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({ update: { whatsappNumber: '919000000001' } }),
+    );
+
+    fake.emit('disconnected', 'NAVIGATION'); // network blip: keep the number
+    await new Promise((r) => setImmediate(r));
+    expect(prisma.appSettings.upsert).toHaveBeenCalledTimes(1);
+
+    fake.emit('disconnected', 'LOGOUT'); // removed under Linked devices on the phone
+    await new Promise((r) => setImmediate(r));
+    expect(prisma.appSettings.upsert).toHaveBeenLastCalledWith(expect.objectContaining({ update: { whatsappNumber: null } }));
+    await s.onModuleDestroy();
+  });
+
+  it('clears the contact number when an admin unlinks the phone', async () => {
+    const { s, fake, prisma } = session();
+    await s.start();
+    fake.emit('ready');
+    await s.logout();
+    expect(prisma.appSettings.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: { whatsappNumber: null } }));
+    await s.onModuleDestroy();
   });
 
   it('stays off unless MESSAGING_PROVIDER is wwebjs', () => {

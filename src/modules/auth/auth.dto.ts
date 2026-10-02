@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class GoogleSignInDto {
   /** Google ID token from the mobile Google Sign-In SDK. */
@@ -30,11 +30,6 @@ export class OtpVerifyDto extends OtpRequestDto {
   @MinLength(2)
   @MaxLength(80)
   name?: string;
-}
-
-export class DevLoginDto {
-  @IsEmail()
-  email: string;
 }
 
 export class AuthUserDto {

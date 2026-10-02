@@ -15,10 +15,6 @@ export class AppConfig {
     return this.get('NODE_ENV') === 'production';
   }
 
-  get devLoginEnabled() {
-    return this.get('ALLOW_DEV_LOGIN') && !this.isProduction;
-  }
-
   get hub() {
     return { lat: this.get('HUB_LAT'), lng: this.get('HUB_LNG') };
   }

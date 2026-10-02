@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Headers, HttpCode, NotFoundException, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentUser, Public, type AuthUser } from '../../common/auth.decorators';
 import { userOut } from '../../common/serializers';
 import { AppConfig } from '../../config/app-config.service';
-import { AuthSessionDto, DevLoginDto, GoogleSignInDto, OtpRequestDto, OtpVerifyDto, RefreshDto } from './auth.dto';
+import { SettingsService } from '../settings/settings.controller';
+import { AuthSessionDto, GoogleSignInDto, OtpRequestDto, OtpVerifyDto, RefreshDto } from './auth.dto';
 import { PhoneOtpService } from './phone-otp.service';
 import { AuthService } from './auth.service';
 
@@ -18,6 +19,7 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly config: AppConfig,
     private readonly phoneOtp: PhoneOtpService,
+    private readonly settings: SettingsService,
   ) {}
 
   /** Exchange a Google ID token for an access + refresh token pair. */
@@ -76,25 +78,20 @@ export class AuthController {
     return { user: userOut(user) };
   }
 
-  /** Public flags the app uses to decide which sign-in options to show. */
+  /**
+   * Public flags the app uses to decide which sign-in options to show, plus the shop's
+   * contact number: the phone linked to WhatsApp, or null (then no number is shown).
+   */
   @Public()
   @Get('config')
-  authConfig() {
+  async authConfig() {
+    const linked = this.config.get('MESSAGING_PROVIDER') === 'wwebjs';
     return {
-      devLogin: this.config.devLoginEnabled,
       googleConfigured: this.config.get('GOOGLE_CLIENT_ID').length > 0,
       otpLogin: this.phoneOtp.enabled,
       otpChannel: this.phoneOtp.channel,
+      supportPhone: linked ? await this.settings.contactNumber() : null,
     };
   }
 
-  /** Development only (ALLOW_DEV_LOGIN=true, never in production): sign in as a seeded account. */
-  @Public()
-  @Post('dev-login')
-  @HttpCode(200)
-  @ApiOkResponse({ type: AuthSessionDto })
-  async devLogin(@Body() dto: DevLoginDto, @Headers('user-agent') ua?: string) {
-    if (!this.config.devLoginEnabled) throw new NotFoundException('Route not found.');
-    return strip(await this.auth.devLogin(dto.email, ua));
-  }
 }

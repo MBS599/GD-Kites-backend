@@ -108,11 +108,15 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
       client.on('auth_failure', (msg: string) => {
         this.state = 'failed';
         this.lastError = `Authentication failed: ${msg}`;
+        void this.saveNumber(null);
       });
       client.on('disconnected', (reason: string) => {
         this.state = 'disconnected';
         this.lastError = `Disconnected: ${reason}`;
         this.logger.warn(this.lastError);
+        // Unlinked from the phone (Linked devices → Log out): stop showing the number.
+        // Other reasons are network blips; the saved login reconnects with the same number.
+        if (reason === 'LOGOUT') void this.saveNumber(null);
         // Try again shortly (a new QR appears if the phone unlinked the device).
         this.restartTimer = setTimeout(() => void this.restart(), 15_000);
       });
@@ -154,6 +158,26 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
     this.qr = null;
     this.lastError = null;
     this.logger.log(`WhatsApp linked (${this.number ?? 'number pending'}) — ${how}.`);
+    void this.rememberNumber();
+  }
+
+  /** The linked number is the shop's public contact number; WhatsApp Web may fill it in just after ready. */
+  private async rememberNumber(tries = 10) {
+    if (this.state !== 'ready') return;
+    if (this.number) return this.saveNumber(this.number);
+    if (tries > 0) setTimeout(() => void this.rememberNumber(tries - 1), 3000);
+  }
+
+  private async saveNumber(whatsappNumber: string | null) {
+    try {
+      await this.prisma.appSettings.upsert({
+        where: { id: 1 },
+        create: { id: 1, whatsappNumber },
+        update: { whatsappNumber },
+      });
+    } catch (e) {
+      this.logger.error(`Could not save the linked WhatsApp number: ${String(e)}`);
+    }
   }
 
   private readyPoll?: NodeJS.Timeout;
@@ -187,6 +211,7 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
   /** Unlinks the phone; a new QR code appears for linking another one. */
   async logout() {
     await this.client?.logout().catch(() => undefined);
+    await this.saveNumber(null);
     await this.restart();
   }
 
