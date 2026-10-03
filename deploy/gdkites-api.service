@@ -1,0 +1,21 @@
+[Unit]
+Description=GD Kites API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=gdkites
+Group=gdkites
+WorkingDirectory=/srv/gdkites/api
+EnvironmentFile=/etc/gdkites/api.env
+# Keeps the API within the 1 GB server; the WhatsApp browser runs as a separate process.
+ExecStart=/usr/bin/node --max-old-space-size=320 dist/main.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/srv/gdkites
+
+[Install]
+WantedBy=multi-user.target

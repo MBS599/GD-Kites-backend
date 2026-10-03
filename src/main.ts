@@ -12,7 +12,7 @@ async function main() {
   const port = config.get('PORT');
   await app.listen(port, '0.0.0.0');
   const log = new Logger('Bootstrap');
-  log.log(`GD Kite Center API on http://0.0.0.0:${port}/api/v1 — docs at /api/docs`);
+  log.log(`GD Kite Center API on http://0.0.0.0:${port}/api/v1${config.isProduction ? '' : ' — docs at /api/docs'}`);
 }
 
 void main();

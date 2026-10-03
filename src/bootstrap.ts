@@ -23,6 +23,11 @@ export function configureApp(app: NestExpressApplication | INestApplication) {
   );
   (app as NestExpressApplication).useStaticAssets(UPLOAD_DIR, { prefix: '/uploads/', maxAge: '7d' });
   (app as NestExpressApplication).disable('x-powered-by');
+  // Behind nginx on the same host: take the client IP from X-Forwarded-For (rate limits are per IP).
+  (app as NestExpressApplication).set('trust proxy', 'loopback');
+
+  // API docs are for development; production doesn't publish the endpoint list.
+  if (config.isProduction) return config;
 
   const doc = new DocumentBuilder()
     .setTitle('GD Kite Center API')
