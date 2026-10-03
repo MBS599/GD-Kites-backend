@@ -67,8 +67,8 @@ PORT=3000
 DATABASE_URL=postgresql://gdkite:$DB_PW@localhost:5432/gdkite?schema=public
 JWT_ACCESS_SECRET=$(openssl rand -hex 48)
 JWT_REFRESH_SECRET=$(openssl rand -hex 48)
-JWT_ACCESS_TTL=15m
-JWT_REFRESH_TTL_DAYS=30
+JWT_ACCESS_TTL=3d
+JWT_REFRESH_TTL_DAYS=365
 PUBLIC_BASE_URL=https://api.gdkites.in
 CORS_ORIGINS=https://gdkites.in,https://www.gdkites.in
 GOOGLE_CLIENT_ID=
