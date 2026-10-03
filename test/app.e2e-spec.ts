@@ -7,6 +7,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/bootstrap';
 import { AuthService } from '../src/modules/auth/auth.service';
+import { PhoneOtpService } from '../src/modules/auth/phone-otp.service';
 import { GoogleVerifier } from '../src/modules/auth/google-verifier.service';
 import { GeoService } from '../src/modules/geo/geo.service';
 import { OtpGenerator } from '../src/modules/sms/otp';
@@ -144,6 +145,29 @@ describe('GD Kite Center API (e2e)', () => {
       } finally {
         await prisma.user.update({ where: { email: 'admin@gdkitecenter.in' }, data: { phone: '+91 20 2426 0000' } });
       }
+    });
+
+    it('Google customers add a mobile number, confirmed by code', async () => {
+      // Google doesn't share a phone number; the new customer from the Google test has none.
+      const user = await prisma.user.findUniqueOrThrow({ where: { email: 'new.shop@example.com' }, include: { driverProfile: true } });
+      expect(user.phone).toBeNull();
+      const { refreshTokenId: _, ...s } = await app.get(AuthService).startSession(user);
+      const otp = app.get(PhoneOtpService); // in-process: the HTTP request limit is used up above
+      await prisma.otpChallenge.deleteMany({});
+
+      // Already confirmed on another account (Sai Kites, from the OTP test).
+      await otp.request('9123456789');
+      const taken = await http.post(`${API}/auth/phone/verify`).set(auth(s)).send({ phone: '9123456789', code: '123456' }).expect(409);
+      expect(taken.body.error.message).toContain('another');
+
+      await otp.request('98111 22233');
+      await http.post(`${API}/auth/phone/verify`).set(auth(s)).send({ phone: '9811122233', code: '000000' }).expect(400);
+      const ok = (await http.post(`${API}/auth/phone/verify`).set(auth(s)).send({ phone: '9811122233', code: '123456' }).expect(200)).body;
+      expect(ok.user).toMatchObject({ phone: '+91 98111 22233', phoneVerified: true, role: 'customer' });
+      // Single use.
+      await http.post(`${API}/auth/phone/verify`).set(auth(s)).send({ phone: '9811122233', code: '123456' }).expect(400);
+      // Order updates now reach that number.
+      expect((await http.get(`${API}/auth/me`).set(auth(s)).expect(200)).body.user.phone).toBe('+91 98111 22233');
     });
 
     it('rotates refresh tokens and revokes the family on reuse', async () => {

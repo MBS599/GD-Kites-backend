@@ -5,7 +5,7 @@ import { CurrentUser, Public, type AuthUser } from '../../common/auth.decorators
 import { userOut } from '../../common/serializers';
 import { AppConfig } from '../../config/app-config.service';
 import { SettingsService } from '../settings/settings.controller';
-import { AuthSessionDto, GoogleSignInDto, OtpRequestDto, OtpVerifyDto, RefreshDto } from './auth.dto';
+import { AuthSessionDto, GoogleSignInDto, OtpRequestDto, OtpVerifyDto, PhoneLinkDto, RefreshDto } from './auth.dto';
 import { PhoneOtpService } from './phone-otp.service';
 import { AuthService } from './auth.service';
 
@@ -53,6 +53,18 @@ export class AuthController {
   async otpVerify(@Body() dto: OtpVerifyDto, @Headers('user-agent') ua?: string) {
     const user = await this.phoneOtp.verify(dto.phone, dto.code, dto.name);
     return strip(await this.auth.startSession(user, ua));
+  }
+
+  /**
+   * Adds a mobile number to the signed-in account, confirmed with a code from
+   * `otp/request`. Order updates on WhatsApp go to this number.
+   */
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('phone/verify')
+  @HttpCode(200)
+  async phoneVerify(@CurrentUser() user: AuthUser, @Body() dto: PhoneLinkDto) {
+    return { user: userOut(await this.phoneOtp.link(user.id, dto.phone, dto.code)) };
   }
 
   /** Rotate the refresh token. The old refresh token becomes invalid. */

@@ -107,20 +107,7 @@ export class PhoneOtpService {
    */
   async verify(raw: string, code: string, name?: string): Promise<UserWithDriver> {
     const phone = this.phone(raw);
-    const challenge = await this.prisma.otpChallenge.findFirst({
-      where: { phone, consumedAt: null, expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!challenge) throw new BadRequestException('This code has expired. Please request a new one.');
-    if (challenge.attempts >= LOGIN_OTP.maxAttempts) {
-      throw tooMany('Too many wrong attempts. Please request a new code.');
-    }
-    if (!sameHash(challenge.codeHash, this.hash(phone, code.trim()))) {
-      const left = LOGIN_OTP.maxAttempts - challenge.attempts - 1;
-      await this.prisma.otpChallenge.update({ where: { id: challenge.id }, data: { attempts: { increment: 1 } } });
-      if (left <= 0) throw tooMany('Too many wrong attempts. Please request a new code.');
-      throw new BadRequestException(`Incorrect code. ${left} ${left === 1 ? 'attempt' : 'attempts'} left.`);
-    }
+    const challenge = await this.check(phone, code);
 
     const existing = await this.findAccount(phone);
     if (existing) {
@@ -131,12 +118,7 @@ export class PhoneOtpService {
       throw new UnprocessableEntityException({ message: 'Tell us your name to create your account.', code: 'name_required' });
     }
 
-    // Single use, even under concurrent requests.
-    const used = await this.prisma.otpChallenge.updateMany({
-      where: { id: challenge.id, consumedAt: null },
-      data: { consumedAt: new Date() },
-    });
-    if (used.count === 0) throw new BadRequestException('This code was already used. Please request a new one.');
+    await this.consume(challenge.id);
 
     if (existing) {
       return this.prisma.user.update({
@@ -155,6 +137,50 @@ export class PhoneOtpService {
       },
       include: { driverProfile: true },
     });
+  }
+
+  /**
+   * Adds a confirmed mobile number to a signed-in account (e.g. after Google sign-up,
+   * so order updates reach the customer on WhatsApp).
+   */
+  async link(userId: string, raw: string, code: string): Promise<UserWithDriver> {
+    const phone = this.phone(raw);
+    const challenge = await this.check(phone, code);
+    const owner = await this.prisma.user.findUnique({ where: { phoneVerified: phone }, select: { id: true } });
+    if (owner && owner.id !== userId) {
+      throw new ConflictException('This number is already used by another GD Kites account.');
+    }
+    await this.consume(challenge.id);
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { phone: display(phone), phoneVerified: phone },
+      include: { driverProfile: true },
+    });
+  }
+
+  /** The live challenge for [phone] if [code] matches it; a wrong code uses up an attempt. */
+  private async check(phone: string, code: string) {
+    const challenge = await this.prisma.otpChallenge.findFirst({
+      where: { phone, consumedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!challenge) throw new BadRequestException('This code has expired. Please request a new one.');
+    if (challenge.attempts >= LOGIN_OTP.maxAttempts) {
+      throw tooMany('Too many wrong attempts. Please request a new code.');
+    }
+    if (!sameHash(challenge.codeHash, this.hash(phone, code.trim()))) {
+      const left = LOGIN_OTP.maxAttempts - challenge.attempts - 1;
+      await this.prisma.otpChallenge.update({ where: { id: challenge.id }, data: { attempts: { increment: 1 } } });
+      if (left <= 0) throw tooMany('Too many wrong attempts. Please request a new code.');
+      throw new BadRequestException(`Incorrect code. ${left} ${left === 1 ? 'attempt' : 'attempts'} left.`);
+    }
+    return challenge;
+  }
+
+  /** Single use, even under concurrent requests. */
+  private async consume(id: string) {
+    const used = await this.prisma.otpChallenge.updateMany({ where: { id, consumedAt: null }, data: { consumedAt: new Date() } });
+    if (used.count === 0) throw new BadRequestException('This code was already used. Please request a new one.');
   }
 
   /** Account already proven for this number, else the one account whose saved phone matches. */

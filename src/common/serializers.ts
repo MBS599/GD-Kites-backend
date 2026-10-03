@@ -100,6 +100,7 @@ export function userOut(u: UserWithDriver) {
     email: u.email,
     name: u.name,
     phone: u.phone,
+    phoneVerified: u.phoneVerified !== null,
     businessName: u.businessName,
     photoUrl: u.photoUrl,
     role: camel(u.role),

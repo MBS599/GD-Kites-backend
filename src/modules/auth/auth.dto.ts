@@ -20,6 +20,11 @@ export class OtpRequestDto {
   phone: string;
 }
 
+export class PhoneLinkDto extends OtpRequestDto {
+  @Matches(/^\d{6}$/, { message: 'Enter the 6-digit code.' })
+  code: string;
+}
+
 export class OtpVerifyDto extends OtpRequestDto {
   @Matches(/^\d{6}$/, { message: 'Enter the 6-digit code.' })
   code: string;
