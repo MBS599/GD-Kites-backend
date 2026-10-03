@@ -17,7 +17,7 @@ sudo -u gdkites -H bash -c "
   set -euo pipefail
   set -a; . /etc/gdkites/api.env; set +a
   cd $API
-  npm ci --no-audit --no-fund
+  npm ci --include=dev --no-audit --no-fund   # build + migrations need the dev tools
   npx prisma generate
   npm run build
   npx prisma migrate deploy
