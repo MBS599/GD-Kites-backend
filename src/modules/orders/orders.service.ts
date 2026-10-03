@@ -51,13 +51,21 @@ export class OrdersService {
           ? { customerId: user.id }
           : { delivery: { driverId: user.driverProfile?.id ?? '__none__', status: { not: 'CANCELLED' } } };
 
-    const numeric = q && /^\s*#?(gd)?\d+\s*$/i.test(q) ? Number(q.replace(/\D/g, '')) : null;
+    // Order numbers typed or spoken: "1042", "#1042", "GD1042", "GD 1042", "order 1042".
+    const numberMatch = q?.replace(/\s+/g, '').match(/^(?:order)?#?(?:gd)?(\d+)$/i);
+    const numeric = numberMatch ? Number(numberMatch[1]) : null;
+    const text = (value: string) => ({ contains: value, mode: 'insensitive' as const });
     const search: Prisma.OrderWhereInput = q
       ? {
           OR: [
-            { contactName: { contains: q, mode: 'insensitive' } },
-            { addrArea: { contains: q, mode: 'insensitive' } },
-            ...(numeric ? [{ number: numeric }] : []),
+            { contactName: text(q) },
+            { contactPhone: text(q) },
+            { addrArea: text(q) },
+            { addrLabel: text(q) },
+            { addrLine: text(q) },
+            { customer: { businessName: text(q) } },
+            ...(user.role === 'ADMIN' ? [{ delivery: { driver: { user: { name: text(q) } } } }] : []),
+            ...(numeric && numeric <= 2_147_483_647 ? [{ number: numeric }] : []),
           ],
         }
       : {};

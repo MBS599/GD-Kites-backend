@@ -978,6 +978,23 @@ describe('GD Kite Center API (e2e)', () => {
       await http.get(`${API}/products/${id}`).set(auth(customer)).expect(404);
     });
 
+    it('finds orders by number however it is typed or spoken, and by driver name', async () => {
+      const all = (await http.get(`${API}/orders`).set(auth(admin)).query({ limit: 100 }).expect(200)).body.orders;
+      const withDriver = all.find((o: any) => o.driver?.name);
+      const code = all[0].code as string;
+      const n = Number(code.replace(/\D/g, ''));
+      for (const q of [`${n}`, `#${n}`, `GD${n}`, `GD ${n}`, `order ${n}`]) {
+        const found = (await http.get(`${API}/orders`).set(auth(admin)).query({ q }).expect(200)).body.orders;
+        expect(found.map((o: any) => o.code)).toContain(code);
+      }
+      const byDriver = (await http.get(`${API}/orders`).set(auth(admin)).query({ q: withDriver.driver.name.split(' ')[0] }).expect(200)).body.orders;
+      expect(byDriver.map((o: any) => o.id)).toContain(withDriver.id);
+      // Customers only ever search their own orders.
+      const me = (await http.get(`${API}/auth/me`).set(auth(customer)).expect(200)).body.user.id;
+      const mine = (await http.get(`${API}/orders`).set(auth(customer)).query({ q: withDriver.customerName }).expect(200)).body.orders;
+      expect(mine.every((o: any) => o.customerId === me)).toBe(true);
+    });
+
     it('pages orders, products and drivers with a stable cursor', async () => {
       const all = (await http.get(`${API}/orders`).set(auth(admin)).query({ limit: 100 }).expect(200)).body;
       expect(all.nextCursor).toBeNull();
@@ -1060,6 +1077,30 @@ describe('GD Kite Center API (e2e)', () => {
       expect(top[0].qty).toBeGreaterThan(0);
       const drivers = (await http.get(`${API}/reports/drivers`).set(auth(admin)).expect(200)).body.drivers;
       expect(drivers.find((x: any) => x.name === 'Rahul Patil').deliveries).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('admin team', () => {
+    it('admins add and remove other admins by Google email', async () => {
+      const added = (await http.post(`${API}/admin/team`).set(auth(admin)).send({ name: 'Second Admin', email: 'Second.Admin@Example.com' }).expect(201)).body;
+      const second = added.admins.find((a: any) => a.email === 'second.admin@example.com');
+      expect(second).toMatchObject({ name: 'Second Admin', joined: false, owner: false });
+      await http.post(`${API}/admin/team`).set(auth(admin)).send({ name: 'Again', email: 'second.admin@example.com' }).expect(409);
+      // Drivers and customers with orders can't be turned into admins.
+      await http.post(`${API}/admin/team`).set(auth(admin)).send({ name: 'Rahul', email: 'rahul.patil@gdkitecenter.in' }).expect(409);
+      await http.post(`${API}/admin/team`).set(auth(admin)).send({ name: 'Mayur', email: 'mayur.traders@gmail.com' }).expect(409);
+      // Only admins manage the team; nobody removes themselves.
+      await http.get(`${API}/admin/team`).set(auth(customer)).expect(403);
+      const me = (await http.get(`${API}/auth/me`).set(auth(admin)).expect(200)).body.user.id;
+      await http.delete(`${API}/admin/team/${me}`).set(auth(admin)).expect(400);
+
+      // The new admin signs in, then loses access as soon as they are removed.
+      const user = await prisma.user.findUniqueOrThrow({ where: { email: 'second.admin@example.com' }, include: { driverProfile: true } });
+      const { refreshTokenId: _, ...s } = await app.get(AuthService).startSession(user);
+      expect((await http.get(`${API}/admin/team`).set(auth(s)).expect(200)).body.admins.length).toBeGreaterThanOrEqual(2);
+      await http.delete(`${API}/admin/team/${second.id}`).set(auth(admin)).expect(204);
+      await http.get(`${API}/admin/team`).set(auth(s)).expect(401);
+      await http.post(`${API}/auth/refresh`).send({ refreshToken: s.refreshToken }).expect(401);
     });
   });
 
