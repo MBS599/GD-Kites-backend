@@ -15,7 +15,7 @@ import { deliveryTariffOf, driverTariffOf } from '../src/common/rates';
 import { deliveryChargeFor, driverFareFor } from '../src/domain/pricing';
 
 const prisma = new PrismaClient();
-const HUB = { lat: Number(process.env.HUB_LAT ?? 18.4866), lng: Number(process.env.HUB_LNG ?? 73.8656) };
+const HUB = { lat: Number(process.env.HUB_LAT ?? 18.444112), lng: Number(process.env.HUB_LNG ?? 73.874016) };
 const D = (n: number) => new Prisma.Decimal(n);
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000);
 const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000);
@@ -47,8 +47,8 @@ async function main() {
   // Launch city is live; the next city is configured but switched off until the admin enables it.
   const pune = await prisma.serviceArea.create({
     data: {
-      name: 'Pune', city: 'Pune', centerLat: 18.5204, centerLng: 73.8567, radiusKm: 25,
-      hubName: 'Market Yard hub', hubLat: HUB.lat, hubLng: HUB.lng, isActive: true,
+      name: 'Pune', city: 'Pune', centerLat: HUB.lat, centerLng: HUB.lng, radiusKm: 100,
+      hubName: 'GD Kite Center', hubLat: HUB.lat, hubLng: HUB.lng, isActive: true,
     },
   });
   await prisma.serviceArea.create({

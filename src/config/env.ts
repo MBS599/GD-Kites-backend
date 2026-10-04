@@ -73,8 +73,8 @@ const schema = z
     RAZORPAY_WEBHOOK_SECRET: z.string().default(''),
     /** Unpaid orders are cancelled after this many minutes. */
     PAYMENT_TIMEOUT_MIN: z.coerce.number().int().min(5).max(1440).default(15),
-    HUB_LAT: z.coerce.number().default(18.4866),
-    HUB_LNG: z.coerce.number().default(73.8656),
+    HUB_LAT: z.coerce.number().default(18.444112),
+    HUB_LNG: z.coerce.number().default(73.874016),
   })
   .refine((e) => e.JWT_ACCESS_SECRET !== e.JWT_REFRESH_SECRET, {
     message: 'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ',
