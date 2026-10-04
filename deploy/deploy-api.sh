@@ -10,6 +10,9 @@ API=/srv/gdkites/api
 systemctl stop gdkites-api || true
 find "$API" -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf {} +
 tar -xzf "$ARCHIVE" -C "$API"
+# The archive has its own empty uploads/ folder: replace it with the persistent one
+# (ln -sfn onto an existing directory would put the link inside it instead).
+rm -rf "$API/uploads"
 ln -sfn /srv/gdkites/data/uploads "$API/uploads"
 chown -R gdkites:gdkites "$API"
 
