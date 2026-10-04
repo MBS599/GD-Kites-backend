@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { lineTotal, unitPrice } from '../../common/pricing';
-import { productInclude, productOut } from '../../common/serializers';
+import { isAvailable, productInclude, productOut } from '../../common/serializers';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const cartInclude = { items: { include: { product: { include: productInclude } }, orderBy: { addedAt: 'asc' } } } as const;
@@ -29,7 +29,7 @@ export class CartService {
         qty: i.qty,
         unitPrice: unitPrice(i.product, i.qty).toNumber(),
         lineTotal: lineTotal(i.product, i.qty).toNumber(),
-        outOfStock: !i.product.inStock,
+        outOfStock: !isAvailable(i.product),
       }));
     const subtotal = items.reduce((s, i) => s + i.lineTotal, 0);
     return {
@@ -48,9 +48,9 @@ export class CartService {
 
   /** Quantities are free (the minimum order value covers small carts); the product must be in stock. */
   private async validQty(productId: string, qty: number) {
-    const p = await this.prisma.product.findFirst({ where: { id: productId, isActive: true } });
+    const p = await this.prisma.product.findFirst({ where: { id: productId, isActive: true }, include: productInclude });
     if (!p) throw new NotFoundException('Product not found.');
-    if (!p.inStock) throw new BadRequestException(`${p.name} is out of stock right now.`);
+    if (!isAvailable(p)) throw new BadRequestException(`${p.name} is out of stock right now.`);
     if (qty < 1) throw new BadRequestException('Quantity must be at least 1.');
   }
 

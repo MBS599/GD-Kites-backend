@@ -1,6 +1,7 @@
 import type {
   Address,
   Category,
+  ComboItem,
   Delivery,
   DriverProfile,
   Order,
@@ -35,7 +36,8 @@ export type DriverWithUser = DriverProfile & {
   serviceArea: ServiceArea | null;
   vehicleType: VehicleType | null;
 };
-export type ProductWithCategory = Product & { category: Category; size: Size | null };
+export type ComboLine = ComboItem & { product: Product & { size: Size | null } };
+export type ProductWithCategory = Product & { category: Category; size: Size | null; comboItems?: ComboLine[] };
 export type FullOrder = Order & {
   items: OrderItem[];
   history: OrderStatusHistory[];
@@ -44,7 +46,41 @@ export type FullOrder = Order & {
   payments?: Payment[];
 };
 
-export const productInclude = { category: true, size: true } as const;
+export const productInclude = {
+  category: true,
+  size: true,
+  comboItems: { include: { product: { include: { size: true } } }, orderBy: { sortOrder: 'asc' } },
+} as const;
+
+/**
+ * Can customers buy it now? The admin's in-stock switch, and for a combo also
+ * every product inside it (a combo with a missing item is out of stock).
+ */
+export function isAvailable(p: Pick<Product, 'inStock' | 'isCombo'> & { comboItems?: ComboLine[] }) {
+  if (!p.inStock) return false;
+  if (!p.isCombo) return true;
+  const items = p.comboItems ?? [];
+  return items.length > 0 && items.every((i) => i.product.isActive && i.product.inStock);
+}
+
+/** "50 × Pona (Big), 2 × Manjha" — a combo's contents, for order lines. */
+export const comboContents = (items: ComboLine[]) =>
+  items.map((i) => `${i.qty} × ${productDisplayName(i.product)}`).join(', ');
+
+/** What the combo's items cost bought separately (base prices). */
+export const comboWorth = (items: ComboLine[]) =>
+  Math.round(items.reduce((s, i) => s + i.product.price.toNumber() * i.qty, 0) * 100) / 100;
+
+/**
+ * Cost of one combo for profit: its own cost price, else the sum of its items'
+ * cost prices (null if any item has none).
+ */
+export function comboCost(p: Pick<Product, 'costPrice'> & { comboItems?: ComboLine[] }) {
+  if (p.costPrice != null) return p.costPrice;
+  const items = p.comboItems ?? [];
+  if (!items.length || items.some((i) => i.product.costPrice == null)) return null;
+  return items.reduce((s, i) => s.add(i.product.costPrice!.mul(i.qty)), items[0].product.costPrice!.mul(0));
+}
 
 /** What customers see: the name with its size, e.g. "Fighter Kite (Medium)". */
 export const productDisplayName = (p: { name: string; size?: { name: string } | null }) =>
@@ -134,9 +170,21 @@ export function productOut(p: ProductWithCategory, { cost = false }: { cost?: bo
     price: m(p.price),
     ...(cost ? { costPrice: money(p.costPrice) } : {}),
     unit: p.unit,
-    inStock: p.inStock,
+    inStock: isAvailable(p),
     isDamaged: p.isDamaged,
     damageNote: p.damageNote,
+    isCombo: p.isCombo,
+    /** Combo contents; empty for ordinary products. */
+    comboItems: (p.comboItems ?? []).map((i) => ({
+      productId: i.productId,
+      name: productDisplayName(i.product),
+      qty: i.qty,
+      unit: i.product.unit,
+      imageUrl: i.product.imageUrl,
+      inStock: i.product.isActive && i.product.inStock,
+    })),
+    /** Combo: what its items cost bought separately (customers see the saving). */
+    worth: p.isCombo && p.comboItems?.length ? comboWorth(p.comboItems) : null,
     description: p.description,
     material: p.material,
     size: p.size ? { id: p.size.id, name: p.size.name } : null,
@@ -224,6 +272,8 @@ export function orderOut(o: FullOrder, { driverLocation = false }: { driverLocat
       qty: i.qty,
       unitPrice: m(i.unitPrice),
       lineTotal: m(i.lineTotal),
+      /** Combo lines: what one combo contains. */
+      contents: i.contents,
     })),
     subtotal: m(o.subtotal),
     deliveryCharge: m(o.deliveryCharge),

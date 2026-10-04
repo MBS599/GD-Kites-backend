@@ -213,6 +213,12 @@ model Product {
   isDamaged   Boolean     @default(false)
   /// What's wrong with it, shown to customers (e.g. "Small tears, colours faded").
   damageNote  String?
+  /// A combo: several products sold together at its own (lower) price. Listed in the "Combos" section.
+  isCombo     Boolean     @default(false)
+  /// What a combo contains (empty for ordinary products).
+  comboItems  ComboItem[] @relation("ComboContents")
+  /// Combos this product is part of.
+  inCombos    ComboItem[] @relation("ComboComponent")
   description String      @default("")
   material    String?
   /// From the size master; shown in the product name for customers, e.g. "Fighter Kite (Medium)".
@@ -233,6 +239,21 @@ model Product {
 
   @@index([categoryId, isActive])
   @@index([isActive, inStock])
+  @@index([isActive, isCombo])
+}
+
+/// One line of a combo: [qty] of [product].
+model ComboItem {
+  id        String  @id @default(uuid())
+  comboId   String
+  combo     Product @relation("ComboContents", fields: [comboId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation("ComboComponent", fields: [productId], references: [id])
+  qty       Int
+  sortOrder Int     @default(0)
+
+  @@unique([comboId, productId])
+  @@index([productId])
 }
 
 /// Size master managed by admins (Small, Medium, Big…).
@@ -326,6 +347,8 @@ model OrderItem {
   lineTotal   Decimal @db.Decimal(12, 2)
   /// Cost per unit at order time (null if the product had no cost price), for profit.
   unitCost    Decimal? @db.Decimal(10, 2)
+  /// Combo lines: what one combo contained at order time, e.g. "50 × Pona (Big), 2 × Manjha".
+  contents    String?
 
   @@index([orderId])
   @@index([productId])

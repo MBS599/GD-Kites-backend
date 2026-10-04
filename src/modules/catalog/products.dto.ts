@@ -1,7 +1,29 @@
 import { PageQuery } from '../../common/paging';
 import { PartialType } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
-import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, IsUrl, IsUUID, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+  ValidateIf,
+  ValidateNested,
+} from 'class-validator';
+
+/** One line of a combo. */
+export class ComboItemDto {
+  @IsUUID() productId: string;
+  @IsInt() @Min(1) @Max(100000) qty: number;
+}
 
 /**
  * Prices are whole rupees (stored as DECIMAL(10,2) so paise can be enabled
@@ -38,6 +60,16 @@ export class CreateProductDto {
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() material?: string | null;
   /** From the size master; null for none. */
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsUUID() sizeId?: string | null;
+
+  /** A combo of other products at its own price. Needs [comboItems]. */
+  @IsOptional() @IsBoolean() isCombo?: boolean;
+  /** Combo contents (replaces the whole list when given). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => ComboItemDto)
+  comboItems?: ComboItemDto[];
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsInt() @Min(1) slabQty?: number | null;
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) slabPrice?: number | null;
 
@@ -58,6 +90,11 @@ export class ProductQuery extends PageQuery {
   @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
   @IsBoolean()
   damaged?: boolean;
+  /** true: only combos (the "Combos" section); false: no combos; omit for all. */
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  combo?: boolean;
   /** Admin: only products switched to out of stock. */
   @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean() outOfStock?: boolean;
 }

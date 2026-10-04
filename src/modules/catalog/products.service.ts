@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { productInclude, productOut } from '../../common/serializers';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
-import type { CreateProductDto, ProductQuery, UpdateProductDto } from './products.dto';
+import type { ComboItemDto, CreateProductDto, ProductQuery, UpdateProductDto } from './products.dto';
 
 @Injectable()
 export class ProductsService {
@@ -19,6 +19,7 @@ export class ProductsService {
       where: {
         isActive: true,
         ...(q.damaged !== undefined ? { isDamaged: q.damaged } : {}),
+        ...(q.combo !== undefined ? { isCombo: q.combo } : {}),
         ...(q.outOfStock ? { inStock: false } : {}),
         ...(q.category ? { category: { slug: q.category } } : {}),
         ...(q.q
@@ -67,10 +68,29 @@ export class ProductsService {
     if (slabPrice != null && slabPrice >= price) throw new BadRequestException('Slab price must be lower than the base price.');
   }
 
+  /**
+   * A combo's lines: existing, active, ordinary products (no combos inside
+   * combos), each once, adding up to at least two pieces.
+   */
+  private async comboLines(items: ComboItemDto[] | undefined, selfId?: string) {
+    if (!items?.length) throw new BadRequestException('Add the products this combo contains.');
+    const ids = items.map((i) => i.productId);
+    if (new Set(ids).size !== ids.length) throw new BadRequestException('Each product can be in a combo only once; change its quantity instead.');
+    if (selfId && ids.includes(selfId)) throw new BadRequestException('A combo cannot contain itself.');
+    const found = await this.prisma.product.findMany({ where: { id: { in: ids }, isActive: true }, select: { id: true, isCombo: true } });
+    if (found.length !== ids.length) throw new BadRequestException('Some products in this combo no longer exist.');
+    if (found.some((p) => p.isCombo)) throw new BadRequestException('A combo cannot contain another combo.');
+    if (items.reduce((s, i) => s + i.qty, 0) < 2) throw new BadRequestException('A combo needs at least two pieces.');
+    return items.map((i, sortOrder) => ({ productId: i.productId, qty: i.qty, sortOrder }));
+  }
+
   async create(dto: CreateProductDto) {
     this.checkSlab(dto.price, dto.slabQty, dto.slabPrice);
+    const lines = dto.isCombo ? await this.comboLines(dto.comboItems) : [];
     const p = await this.prisma.product.create({
       data: {
+        isCombo: dto.isCombo ?? false,
+        comboItems: lines.length ? { create: lines } : undefined,
         name: dto.name.trim(),
         categoryId: await this.categoryId(dto.category),
         sizeId: (await this.sizeId(dto.sizeId)) ?? null,
@@ -102,9 +122,20 @@ export class ProductsService {
     this.checkSlab(price, slabQty, slabPrice);
 
     const isDamaged = dto.isDamaged ?? existing.isDamaged;
+    const isCombo = dto.isCombo ?? existing.isCombo;
+    if (isCombo && dto.comboItems === undefined && !existing.isCombo) {
+      throw new BadRequestException('Add the products this combo contains.');
+    }
+    if (isCombo && !existing.isCombo && (await this.prisma.comboItem.count({ where: { productId: id } }))) {
+      throw new BadRequestException('This product is part of a combo, so it cannot be a combo itself.');
+    }
+    const lines = isCombo && dto.comboItems !== undefined ? await this.comboLines(dto.comboItems, id) : null;
     const p = await this.prisma.product.update({
       where: { id },
       data: {
+        isCombo,
+        // Contents replaced when given; cleared when it stops being a combo.
+        comboItems: !isCombo ? { deleteMany: {} } : lines ? { deleteMany: {}, create: lines } : undefined,
         name: dto.name?.trim(),
         categoryId: dto.category ? await this.categoryId(dto.category) : undefined,
         sizeId: dto.sizeId === undefined || dto.sizeId === existing.sizeId ? undefined : await this.sizeId(dto.sizeId),

@@ -36,6 +36,7 @@ async function main() {
     prisma.driverProfile.deleteMany(),
     prisma.vehicleType.deleteMany(),
     prisma.refreshToken.deleteMany(),
+    prisma.comboItem.deleteMany(),
     prisma.product.deleteMany(),
     prisma.size.deleteMany({ where: { name: { notIn: ['Small', 'Medium', 'Big'] } } }),
     prisma.category.deleteMany(),
@@ -155,6 +156,19 @@ async function main() {
       description: 'Transparent tape for quick kite repairs.',
     }),
   };
+
+  // A combo: several products at one lower price (worth ₹2,980 bought separately).
+  const starter = await mkProduct({
+    name: 'Festival Starter Combo', category: 'fighterKites', price: 2600, unit: 'combo', isCombo: true,
+    buyerCount: 12, description: '100 fighter kites, 2 reels of Bareilly manjha and a wooden charkha.',
+  });
+  await prisma.comboItem.createMany({
+    data: [
+      { comboId: starter.id, productId: p.fighter.id, qty: 100, sortOrder: 0 },
+      { comboId: starter.id, productId: p.manjha.id, qty: 2, sortOrder: 1 },
+      { comboId: starter.id, productId: p.charkha.id, qty: 1, sortOrder: 2 },
+    ],
+  });
 
   // ---- Users & drivers ------------------------------------------------------------
   await prisma.user.create({

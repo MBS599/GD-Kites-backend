@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException, HttpException, HttpStatus, Inje
 import { Prisma, type OrderStatus } from '@prisma/client';
 import type { AuthUser } from '../../common/auth.decorators';
 import { lineTotal, unitPrice } from '../../common/pricing';
-import { orderInclude, orderOut, productDisplayName, upperSnake, type FullOrder } from '../../common/serializers';
+import { comboContents, comboCost, isAvailable, orderInclude, orderOut, productDisplayName, productInclude, type FullOrder, upperSnake } from '../../common/serializers';
 import { deliveryChargeFor, driverFareFor, etaMinutes } from '../../domain/pricing';
 import { PrismaService } from '../../prisma/prisma.service';
 import { deliveryTariffOf, driverTariffOf } from '../../common/rates';
@@ -184,7 +184,7 @@ export class OrdersService {
 
       const cart = await tx.cart.findUnique({
         where: { userId: customer.id },
-        include: { items: { include: { product: { include: { size: true } } }, orderBy: { addedAt: 'asc' } } },
+        include: { items: { include: { product: { include: productInclude } }, orderBy: { addedAt: 'asc' } } },
       });
       const lines = cart?.items ?? [];
       if (lines.length === 0) throw new BadRequestException('Your cart is empty.');
@@ -195,7 +195,7 @@ export class OrdersService {
       for (const { product: p, qty } of lines) {
         const name = productDisplayName(p);
         if (!p.isActive) throw new BadRequestException(`${name} is no longer available. Remove it from your cart.`);
-        if (!p.inStock) throw new ConflictException(`${name} is out of stock right now. Remove it from your cart.`);
+        if (!isAvailable(p)) throw new ConflictException(`${name} is out of stock right now. Remove it from your cart.`);
         const total = lineTotal(p, qty);
         subtotal = subtotal.add(total);
         itemRows.push({
@@ -205,7 +205,9 @@ export class OrdersService {
           qty,
           unitPrice: unitPrice(p, qty),
           lineTotal: total,
-          unitCost: p.costPrice,
+          // Combos: their own cost price, else what their items cost.
+          unitCost: p.isCombo ? comboCost(p) : p.costPrice,
+          contents: p.isCombo ? comboContents(p.comboItems) : null,
         });
       }
 

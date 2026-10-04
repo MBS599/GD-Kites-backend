@@ -215,7 +215,7 @@ describe('GD Kite Center API (e2e)', () => {
   describe('catalogue & cart', () => {
     it('lists products with search and category filter', async () => {
       const all = await http.get(`${API}/products`).set(auth(customer)).expect(200);
-      expect(all.body.products.length).toBe(9);
+      expect(all.body.products.length).toBe(10);
       const manjha = await http.get(`${API}/products?category=manjha`).set(auth(customer)).expect(200);
       expect(manjha.body.products.every((p: any) => p.category === 'manjha')).toBe(true);
       const q = await http.get(`${API}/products?q=tukkal`).set(auth(customer)).expect(200);
@@ -1198,6 +1198,72 @@ describe('GD Kite Center API (e2e)', () => {
       expect(after.profit - before.profit).toBeCloseTo(200 * (9.2 - 7.5), 2);
       expect(after.costedSales - before.costedSales).toBeCloseTo(1840, 2);
       await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
+      await http.delete(`${API}/products/${created.id}`).set(auth(admin)).expect(204);
+    });
+  });
+
+  describe('combos', () => {
+    it('lists combos with their contents and saving; sold and ordered like any product', async () => {
+      const combos = (await http.get(`${API}/products?combo=true`).set(auth(customer)).expect(200)).body.products;
+      expect(combos).toHaveLength(1);
+      const c = combos[0];
+      expect(c).toMatchObject({ isCombo: true, price: 2600, worth: 2980, inStock: true });
+      expect(c.comboItems.map((i: any) => `${i.qty} × ${i.name}`)).toEqual([
+        '100 × Premium Fighter Kite (Medium)',
+        '2 × Bareilly Manjha 9 Cord',
+        '1 × Wooden Charkha 12 in.',
+      ]);
+      const regular = (await http.get(`${API}/products?combo=false`).set(auth(customer))).body.products;
+      expect(regular.some((p: any) => p.isCombo)).toBe(false);
+
+      // Order it: the line keeps what the combo contained; profit uses its items' cost.
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: c.id, qty: 1 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(201)).body.order;
+      expect(order.items[0]).toMatchObject({ name: 'Festival Starter Combo', qty: 1, lineTotal: 2600 });
+      expect(order.items[0].contents).toBe('100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord, 1 × Wooden Charkha 12 in.');
+      await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
+    });
+
+    it('a combo is out of stock when anything inside it is', async () => {
+      const c = (await http.get(`${API}/products?combo=true`).set(auth(admin))).body.products[0];
+      const manjha = c.comboItems.find((i: any) => i.name.startsWith('Bareilly')).productId;
+      await http.patch(`${API}/products/${manjha}`).set(auth(admin)).send({ inStock: false }).expect(200);
+      const off = (await http.get(`${API}/products/${c.id}`).set(auth(customer))).body.product;
+      expect(off.inStock).toBe(false);
+      expect(off.comboItems.find((i: any) => i.productId === manjha).inStock).toBe(false);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: c.id, qty: 1 }).expect(400);
+      await http.patch(`${API}/products/${manjha}`).set(auth(admin)).send({ inStock: true }).expect(200);
+      expect((await http.get(`${API}/products/${c.id}`).set(auth(customer))).body.product.inStock).toBe(true);
+    });
+
+    it('admin creates, edits and validates combos', async () => {
+      const products = (await http.get(`${API}/products?combo=false`).set(auth(admin))).body.products;
+      const [a, b] = products;
+      const created = (
+        await http
+          .post(`${API}/products`)
+          .set(auth(admin))
+          .send({ name: 'Mini Combo', category: 'fighterKites', price: 50, isCombo: true, comboItems: [{ productId: a.id, qty: 2 }, { productId: b.id, qty: 1 }] })
+          .expect(201)
+      ).body.product;
+      expect(created.comboItems).toHaveLength(2);
+      const edited = (
+        await http.patch(`${API}/products/${created.id}`).set(auth(admin)).send({ comboItems: [{ productId: a.id, qty: 5 }] }).expect(200)
+      ).body.product;
+      expect(edited.comboItems).toEqual([expect.objectContaining({ productId: a.id, qty: 5 })]);
+
+      const bad = (body: object) => http.post(`${API}/products`).set(auth(admin)).send({ name: 'Bad', category: 'fighterKites', price: 10, isCombo: true, ...body }).expect(400);
+      await bad({});
+      await bad({ comboItems: [{ productId: a.id, qty: 1 }] });
+      await bad({ comboItems: [{ productId: a.id, qty: 1 }, { productId: a.id, qty: 2 }] });
+      await bad({ comboItems: [{ productId: created.id, qty: 2 }] });
+      // A product inside a combo can't become a combo itself.
+      await http.patch(`${API}/products/${a.id}`).set(auth(admin)).send({ isCombo: true, comboItems: [{ productId: b.id, qty: 2 }] }).expect(400);
+
+      const plain = (await http.patch(`${API}/products/${created.id}`).set(auth(admin)).send({ isCombo: false }).expect(200)).body.product;
+      expect(plain).toMatchObject({ isCombo: false, comboItems: [], worth: null });
       await http.delete(`${API}/products/${created.id}`).set(auth(admin)).expect(204);
     });
   });
