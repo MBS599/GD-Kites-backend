@@ -1,5 +1,19 @@
 import { PageQuery } from '../../common/paging';
-import { Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  ConflictException,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   IsEmail,
@@ -12,11 +26,12 @@ import {
   IsUUID,
   Matches,
   Max,
+  MaxLength,
   Min,
   MinLength,
   ValidateIf,
 } from 'class-validator';
-import { CurrentUser, Roles, type AuthUser } from '../../common/auth.decorators';
+import { canDrive, CurrentUser, Roles, type AuthUser } from '../../common/auth.decorators';
 import { PHONE_MSG, PHONE_RE } from '../../common/validation';
 import { DriversService } from './drivers.service';
 
@@ -57,6 +72,12 @@ export class UpdateDriverDto {
   customPerKm?: number | null;
 }
 
+/** An admin who also delivers: their vehicle. */
+export class SelfDrivingDto {
+  @IsUUID() vehicleTypeId: string;
+  @IsOptional() @IsString() @MaxLength(20) vehicleNumber?: string;
+}
+
 export class DriverAreaDto {
   @IsUUID() serviceAreaId: string;
 }
@@ -66,8 +87,8 @@ export class DriverListQuery extends PageQuery {
 }
 
 export const driverIdOf = (user: AuthUser) => {
-  if (user.role !== 'DRIVER' || !user.driverProfile) throw new ForbiddenException('No driver profile is linked to this account.');
-  return user.driverProfile.id;
+  if (!canDrive(user)) throw new ForbiddenException('No driver profile is linked to this account.');
+  return user.driverProfile!.id;
 };
 
 @ApiTags('Drivers')
@@ -87,6 +108,25 @@ export class DriversController {
   @Patch('me/availability')
   async availability(@CurrentUser() user: AuthUser, @Body() dto: AvailabilityDto) {
     return { driver: await this.drivers.setAvailability(driverIdOf(user), dto.availability === 'available') };
+  }
+
+  /**
+   * Admin: "I also deliver". Gives the admin's own account a driver profile
+   * (driver pay ₹0 — the owner keeps the whole delivery charge), so orders can
+   * be assigned to them and they get the delivery screens.
+   */
+  @Roles('ADMIN')
+  @Put('me/self-driving')
+  async enableSelfDriving(@CurrentUser() user: AuthUser, @Body() dto: SelfDrivingDto) {
+    return { driver: await this.drivers.enableSelf(user, dto.vehicleTypeId, dto.vehicleNumber) };
+  }
+
+  /** Admin stops delivering: hidden from driver lists; past deliveries are kept. */
+  @Roles('ADMIN')
+  @Delete('me/self-driving')
+  @HttpCode(204)
+  async disableSelfDriving(@CurrentUser() user: AuthUser) {
+    await this.drivers.disableSelf(user);
   }
 
   /** REST fallback for live location (the app normally sends `driver:location` over the socket). */

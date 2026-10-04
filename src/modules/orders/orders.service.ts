@@ -291,7 +291,7 @@ export class OrdersService {
         where: { id: driverId },
         include: { user: true, vehicleType: true },
       });
-      if (!driver || !driver.user.isActive) throw new NotFoundException('Driver not found.');
+      if (!driver || !driver.isActive || !driver.user.isActive) throw new NotFoundException('Driver not found.');
       if (driver.availability === 'OFFLINE') throw new ConflictException(`${driver.user.name} is offline.`);
       if (driver.serviceAreaId && o.serviceAreaId && driver.serviceAreaId !== o.serviceAreaId) {
         throw new ConflictException(`${driver.user.name} works in a different service area.`);

@@ -383,6 +383,9 @@ model DriverProfile {
   customBaseFare Decimal?           @db.Decimal(10, 2)
   customPerKm    Decimal?           @db.Decimal(10, 2)
   hub            String             @default("Katraj hub")
+  /// Off: not listed or assignable, and can't use the delivery screens (history kept).
+  /// Used when an admin who also delivers stops delivering.
+  isActive       Boolean            @default(true)
   lastLat        Float?
   lastLng        Float?
   lastLocationAt DateTime?

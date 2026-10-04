@@ -1,3 +1,4 @@
+import type { AuthUser } from '../../common/auth.decorators';
 import { pageArgs, toPage, type PageQuery } from '../../common/paging';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, type DriverType } from '@prisma/client';
@@ -97,7 +98,7 @@ export class DriversService {
   async list(serviceAreaId?: string, paging: PageQuery = {}) {
     const { limit, args } = pageArgs(paging);
     const drivers = await this.prisma.driverProfile.findMany({
-      where: { user: { isActive: true }, ...(serviceAreaId ? { serviceAreaId } : {}) },
+      where: { isActive: true, user: { isActive: true }, ...(serviceAreaId ? { serviceAreaId } : {}) },
       include: driverInclude,
       orderBy: [{ user: { name: 'asc' } }, { id: 'asc' }],
       ...args,
@@ -191,6 +192,54 @@ export class DriversService {
     this.realtime.driverUpdated(driver);
     const [out] = await this.withCounts([driver]);
     return out;
+  }
+
+  /** An admin starts delivering too (or changes their vehicle). Driver pay ₹0 unless changed later. */
+  async enableSelf(admin: AuthUser, vehicleTypeId: string, vehicleNumber?: string) {
+    const vehicle = await this.prisma.vehicleType.findUnique({ where: { id: vehicleTypeId } });
+    if (!vehicle || !vehicle.isActive) throw new NotFoundException('Vehicle type not found.');
+    const area = await this.prisma.serviceArea.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' } });
+    const number = vehicleNumber?.trim().toUpperCase() || 'OWN VEHICLE';
+    const existing = await this.prisma.driverProfile.findUnique({ where: { userId: admin.id } });
+    const driver = existing
+      ? await this.prisma.driverProfile.update({
+          where: { id: existing.id },
+          data: { isActive: true, vehicleTypeId: vehicle.id, vehicleNumber: number },
+          include: driverInclude,
+        })
+      : await this.prisma.driverProfile.create({
+          data: {
+            userId: admin.id,
+            type: 'GD',
+            vehicleNumber: number,
+            vehicleTypeId: vehicle.id,
+            serviceAreaId: area?.id ?? null,
+            hub: area?.hubName ?? 'Hub',
+            // The owner delivering pays no driver fare: the delivery charge is all earnings.
+            customBaseFare: new Prisma.Decimal(0),
+            customPerKm: new Prisma.Decimal(0),
+          },
+          include: driverInclude,
+        });
+    this.realtime.driverUpdated(driver);
+    const [out] = await this.withCounts([driver]);
+    return out;
+  }
+
+  /** The admin stops delivering. Open deliveries must be finished or reassigned first. */
+  async disableSelf(admin: AuthUser) {
+    const existing = await this.prisma.driverProfile.findUnique({ where: { userId: admin.id } });
+    if (!existing || !existing.isActive) return;
+    const open = await this.prisma.delivery.count({ where: { driverId: existing.id, status: { in: ['ASSIGNED', 'IN_TRANSIT'] } } });
+    if (open > 0) {
+      throw new ConflictException(`You still have ${open} open ${open === 1 ? 'delivery' : 'deliveries'}. Finish or reassign them first.`);
+    }
+    const driver = await this.prisma.driverProfile.update({
+      where: { id: existing.id },
+      data: { isActive: false, availability: 'OFFLINE', lastLat: null, lastLng: null, lastLocationAt: null },
+      include: driverInclude,
+    });
+    this.realtime.driverUpdated(driver);
   }
 
   /**

@@ -138,6 +138,7 @@ export class DispatchService {
     return this.prisma.driverProfile.findMany({
       where: {
         availability: { not: 'OFFLINE' },
+        isActive: true,
         user: { isActive: true },
         ...(serviceAreaId ? { serviceAreaId } : {}),
       },

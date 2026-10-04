@@ -4,7 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import type { Role } from '@prisma/client';
 import { AppConfig } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { AuthUser, IS_PUBLIC, ROLES } from './auth.decorators';
+import { AuthUser, canDrive, IS_PUBLIC, ROLES } from './auth.decorators';
 
 export interface AccessPayload {
   sub: string;
@@ -63,7 +63,9 @@ export class RolesGuard implements CanActivate {
     const roles = this.reflector.getAllAndOverride<Role[] | undefined>(ROLES, [ctx.getHandler(), ctx.getClass()]);
     if (!roles || roles.length === 0) return true;
     const user: AuthUser | undefined = ctx.switchToHttp().getRequest().user;
-    if (!user || !roles.includes(user.role)) {
+    // Driver routes are also open to admins who deliver themselves.
+    const allowed = !!user && (roles.includes(user.role) || (roles.includes('DRIVER') && canDrive(user)));
+    if (!allowed) {
       throw new ForbiddenException('You do not have access to this resource.');
     }
     return true;

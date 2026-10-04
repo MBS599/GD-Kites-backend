@@ -1,3 +1,4 @@
+import { canDrive } from '../../common/auth.decorators';
 import { Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
@@ -43,14 +44,14 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
     socket.data.user = user;
     await socket.join(`user:${user.id}`);
     if (user.role === 'ADMIN') await socket.join('admins');
-    if (user.role === 'DRIVER' && user.driverProfile) await socket.join(`driver:${user.driverProfile.id}`);
+    if (canDrive(user)) await socket.join(`driver:${user.driverProfile!.id}`);
   }
 
   /** Drivers publish their position; forwarded to admins and customers with an order on the road. */
   @SubscribeMessage('driver:location')
   async onDriverLocation(@ConnectedSocket() socket: Socket, @MessageBody() body: { lat?: unknown; lng?: unknown }) {
     const user = socket.data.user as AuthUser | undefined;
-    if (!user || user.role !== 'DRIVER' || !user.driverProfile) return;
+    if (!user || !canDrive(user)) return;
     const lat = Number(body?.lat);
     const lng = Number(body?.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return;
@@ -59,7 +60,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
     if (now - ((socket.data.lastLocationAt as number | undefined) ?? 0) < LOCATION_MIN_INTERVAL_MS) return;
     socket.data.lastLocationAt = now;
     try {
-      await this.drivers.updateLocation(user.driverProfile.id, lat, lng);
+      await this.drivers.updateLocation(user.driverProfile!.id, lat, lng);
     } catch (e) {
       this.logger.warn(`location update failed: ${String(e)}`);
     }

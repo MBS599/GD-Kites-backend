@@ -102,7 +102,8 @@ export class SmsService {
     if (!d) return;
     const code = orderCode(o.number);
     this.toCustomer(o, 'driverAssigned', [code, d.user.name, d.user.phone ?? '']);
-    this.toUser(d.user, 'deliveryAssigned', [code, o.contactName, o.addrArea], o.id);
+    // The owner delivering themselves already knows (they assigned it).
+    if (d.user.role !== 'ADMIN') this.toUser(d.user, 'deliveryAssigned', [code, o.contactName, o.addrArea], o.id);
     if (previousDriverId && previousDriverId !== d.id) this.toDriverId(previousDriverId, 'deliveryRemoved', [code], o.id);
   }
 

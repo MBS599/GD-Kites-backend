@@ -56,7 +56,7 @@ export class DeliveriesService {
     const otp = this.otp.code(DELIVERY_OTP_DIGITS);
     const driver = await this.prisma.tx(async (tx) => {
       const o = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
-      const to = assertTransition('start', o.status, user.role);
+      const to = assertTransition('start', o.status, 'DRIVER');
       await moveOrder(tx, orderId, o.status, to, user.id);
       await tx.delivery.update({
         where: { orderId },
@@ -103,7 +103,7 @@ export class DeliveriesService {
 
     const driver = await this.prisma.tx(async (tx) => {
       const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { items: true } });
-      const to = assertTransition('complete', o.status, user.role);
+      const to = assertTransition('complete', o.status, 'DRIVER');
       const now = new Date();
       await moveOrder(tx, orderId, o.status, to, user.id, null, { deliveredAt: now });
       await tx.delivery.update({

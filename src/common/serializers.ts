@@ -149,7 +149,8 @@ export function userOut(u: UserWithDriver) {
     businessName: u.businessName,
     photoUrl: u.photoUrl,
     role: camel(u.role),
-    driverId: u.driverProfile?.id ?? null,
+    /** Set for drivers, and for admins who also deliver. */
+    driverId: u.driverProfile?.isActive ? u.driverProfile.id : null,
     smsEnabled: u.smsEnabled,
   };
 }

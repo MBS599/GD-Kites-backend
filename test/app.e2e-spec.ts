@@ -1268,6 +1268,60 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('admin who also delivers', () => {
+    it('gets a driver profile (pay ₹0), takes an order through the delivery screens, then stops', async () => {
+      const tempo = (await http.get(`${API}/vehicle-types`).set(auth(admin))).body.vehicleTypes.find((t: any) => t.name === 'Tempo');
+      // Before: admins can't use the delivery screens.
+      await http.get(`${API}/deliveries`).set(auth(admin)).expect(403);
+      await http.put(`${API}/drivers/me/self-driving`).set(auth(customer)).send({ vehicleTypeId: tempo.id }).expect(403);
+
+      const me = (await http.put(`${API}/drivers/me/self-driving`).set(auth(admin)).send({ vehicleTypeId: tempo.id }).expect(200)).body.driver;
+      expect(me).toMatchObject({ name: 'GD Kite Center', vehicleType: { name: 'Tempo' } });
+      const profile = (await http.get(`${API}/auth/me`).set(auth(admin)).expect(200)).body.user;
+      expect(profile).toMatchObject({ role: 'admin', driverId: me.id });
+      const drivers = (await http.get(`${API}/drivers`).set(auth(admin))).body.drivers;
+      expect(drivers.some((d: any) => d.id === me.id)).toBe(true);
+
+      // Order assigned to themselves: no driver pay, and no "new delivery" message to themselves.
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(201)).body.order;
+      await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(200);
+      await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: me.id }).expect(200);
+      const assigned = (await http.get(`${API}/orders/${order.id}`).set(auth(admin))).body.order;
+      expect(assigned.driverFare).toBe(0);
+      const adminUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@gdkitecenter.in' } });
+      await app.get(SmsService).drain();
+      expect(await prisma.smsMessage.count({ where: { orderId: order.id, event: 'deliveryAssigned', userId: adminUser.id } })).toBe(0);
+
+      // The delivery screens work for them.
+      const mine = (await http.get(`${API}/deliveries?scope=active`).set(auth(admin)).expect(200)).body.orders;
+      expect(mine.map((o: any) => o.id)).toContain(order.id);
+      await http.get(`${API}/drivers/me`).set(auth(admin)).expect(200);
+      await http.post(`${API}/drivers/me/location`).set(auth(admin)).send({ lat: 18.45, lng: 73.87 }).expect(200);
+      await http.post(`${API}/deliveries/${order.id}/start`).set(auth(admin)).expect(200);
+      const png = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        'base64',
+      );
+      await http.post(`${API}/deliveries/${order.id}/proof`).set(auth(admin)).attach('file', png, { filename: 'p.png', contentType: 'image/png' }).expect(201);
+      // Can't stop delivering with a trip open.
+      await http.delete(`${API}/drivers/me/self-driving`).set(auth(admin)).expect(409);
+      const otp = (await http.get(`${API}/orders/${order.id}`).set(auth(admin))).body.deliveryOtp;
+      await http.post(`${API}/deliveries/${order.id}/complete`).set(auth(admin)).send({ customerReceived: true, cashCollected: true, otp }).expect(200);
+      expect((await http.get(`${API}/orders/${order.id}`).set(auth(admin))).body.order.status).toBe('delivered');
+
+      // Stop delivering: hidden from drivers, delivery screens closed, history kept.
+      await http.delete(`${API}/drivers/me/self-driving`).set(auth(admin)).expect(204);
+      expect((await http.get(`${API}/auth/me`).set(auth(admin))).body.user.driverId).toBeNull();
+      expect((await http.get(`${API}/drivers`).set(auth(admin))).body.drivers.some((d: any) => d.id === me.id)).toBe(false);
+      await http.get(`${API}/deliveries`).set(auth(admin)).expect(403);
+      expect((await http.get(`${API}/orders/${order.id}`).set(auth(admin))).body.order.status).toBe('delivered');
+    });
+  });
+
   describe('admin team', () => {
     it('admins add and remove other admins by Google email', async () => {
       const added = (await http.post(`${API}/admin/team`).set(auth(admin)).send({ name: 'Second Admin', email: 'Second.Admin@Example.com' }).expect(201)).body;
