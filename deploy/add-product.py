@@ -68,6 +68,7 @@ def main():
         'category': p['category'],
         'size': p.get('size') or '',
         'price': str(p['price']),
+        'cost_price': '' if p.get('costPrice') is None else str(p['costPrice']),
         'unit': (p.get('unit') or 'piece').strip(),
         'in_stock': 'true' if p.get('inStock', True) else 'false',
         'is_damaged': 'true' if is_damaged else 'false',
@@ -79,11 +80,11 @@ def main():
         'image_url': image_url or '',
     }
     sql = """
-INSERT INTO "Product" (id, name, "categoryId", "sizeId", price, unit, "inStock", "isDamaged", "damageNote",
+INSERT INTO "Product" (id, name, "categoryId", "sizeId", price, "costPrice", unit, "inStock", "isDamaged", "damageNote",
                        description, material, "slabQty", "slabPrice", "imageUrl", "updatedAt")
 SELECT gen_random_uuid()::text, :'name', c.id,
        (SELECT s.id FROM "Size" s WHERE s.name = NULLIF(:'size', '') AND s."isActive"),
-       :'price'::numeric, :'unit', :'in_stock'::boolean, :'is_damaged'::boolean, NULLIF(:'damage_note', ''),
+       :'price'::numeric, NULLIF(:'cost_price', '')::numeric, :'unit', :'in_stock'::boolean, :'is_damaged'::boolean, NULLIF(:'damage_note', ''),
        :'description', NULLIF(:'material', ''), NULLIF(:'slab_qty', '')::int, NULLIF(:'slab_price', '')::numeric,
        NULLIF(:'image_url', ''), now()
 FROM "Category" c WHERE c.slug = :'category' AND c."isActive"
