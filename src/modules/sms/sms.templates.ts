@@ -63,10 +63,6 @@ export const SMS_TEMPLATES = {
     audience: 'admin',
     text: 'New order {#var#} from {#var#} for Rs {#var#}. Please confirm it in the GD Kite Center app.',
   },
-  adminLowStock: {
-    audience: 'admin',
-    text: 'Low stock: {#var#} has {#var#} left. Please restock. - GD Kite Center',
-  },
 
   /** Admin "send test SMS" from Settings. */
   test: {

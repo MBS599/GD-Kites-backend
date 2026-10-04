@@ -57,13 +57,6 @@ enum PaymentStatus {
   REFUND_FAILED
 }
 
-enum InventoryReason {
-  INITIAL
-  ORDER_RESERVED
-  ORDER_RELEASED
-  ADMIN_ADJUSTMENT
-}
-
 model User {
   id            String         @id @default(uuid())
   /// Null for accounts created by mobile-number (OTP) sign-in.
@@ -206,49 +199,48 @@ model Category {
 }
 
 model Product {
-  id                String              @id @default(uuid())
-  name              String
-  categoryId        String
-  category          Category            @relation(fields: [categoryId], references: [id])
-  price             Decimal             @db.Decimal(10, 2)
-  unit              String              @default("piece")
-  minOrderQty       Int
-  stock             Int
-  lowStockThreshold Int                 @default(200)
-  description       String              @default("")
-  material          String?
-  size              String?
+  id          String      @id @default(uuid())
+  name        String
+  categoryId  String
+  category    Category    @relation(fields: [categoryId], references: [id])
+  price       Decimal     @db.Decimal(10, 2)
+  unit        String      @default("piece")
+  /// Switched by the admin; customers can't add out-of-stock products (no stock counts are kept).
+  inStock     Boolean     @default(true)
+  /// Damaged goods sold cheaply: listed in their own "Damaged" section with a clear badge.
+  isDamaged   Boolean     @default(false)
+  /// What's wrong with it, shown to customers (e.g. "Small tears, colours faded").
+  damageNote  String?
+  description String      @default("")
+  material    String?
+  /// From the size master; shown in the product name for customers, e.g. "Fighter Kite (Medium)".
+  sizeId      String?
+  size        Size?       @relation(fields: [sizeId], references: [id], onDelete: SetNull)
   /// Wholesale slab: above slabQty the unit price becomes slabPrice.
-  slabQty           Int?
-  slabPrice         Decimal?            @db.Decimal(10, 2)
-  imageUrl          String?
-  rating            Float?
-  buyerCount        Int                 @default(0)
+  slabQty     Int?
+  slabPrice   Decimal?    @db.Decimal(10, 2)
+  imageUrl    String?
+  rating      Float?
+  buyerCount  Int         @default(0)
   /// Soft delete keeps order history intact.
-  isActive          Boolean             @default(true)
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  cartItems         CartItem[]
-  orderItems        OrderItem[]
-  inventoryLog      InventoryMovement[]
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  cartItems   CartItem[]
+  orderItems  OrderItem[]
 
   @@index([categoryId, isActive])
-  @@index([isActive, stock])
+  @@index([isActive, inStock])
 }
 
-model InventoryMovement {
-  id         String          @id @default(uuid())
-  productId  String
-  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
-  delta      Int
-  stockAfter Int
-  reason     InventoryReason
-  orderId    String?
-  actorId    String?
-  note       String?
-  createdAt  DateTime        @default(now())
-
-  @@index([productId, createdAt])
+/// Size master managed by admins (Small, Medium, Big…).
+model Size {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  sortOrder Int       @default(0)
+  /// Hidden sizes stay on existing products but can't be picked for new ones.
+  isActive  Boolean   @default(true)
+  products  Product[]
 }
 
 model Cart {

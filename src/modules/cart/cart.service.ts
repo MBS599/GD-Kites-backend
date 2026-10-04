@@ -29,8 +29,7 @@ export class CartService {
         qty: i.qty,
         unitPrice: unitPrice(i.product, i.qty).toNumber(),
         lineTotal: lineTotal(i.product, i.qty).toNumber(),
-        belowMinimum: i.qty < i.product.minOrderQty,
-        exceedsStock: i.qty > i.product.stock,
+        outOfStock: !i.product.inStock,
       }));
     const subtotal = items.reduce((s, i) => s + i.lineTotal, 0);
     return {
@@ -38,7 +37,7 @@ export class CartService {
         items,
         itemCount: items.length,
         subtotal,
-        isValid: items.length > 0 && items.every((i) => !i.belowMinimum && !i.exceedsStock),
+        isValid: items.length > 0 && items.every((i) => !i.outOfStock),
       },
     };
   }
@@ -47,11 +46,12 @@ export class CartService {
     return this.view(await this.cartFor(userId));
   }
 
+  /** Quantities are free (the minimum order value covers small carts); the product must be in stock. */
   private async validQty(productId: string, qty: number) {
     const p = await this.prisma.product.findFirst({ where: { id: productId, isActive: true } });
     if (!p) throw new NotFoundException('Product not found.');
-    if (qty < p.minOrderQty) throw new BadRequestException(`${p.name}: minimum order is ${p.minOrderQty} ${p.unit}s.`);
-    if (qty > p.stock) throw new BadRequestException(`${p.name}: only ${p.stock} ${p.unit}s in stock.`);
+    if (!p.inStock) throw new BadRequestException(`${p.name} is out of stock right now.`);
+    if (qty < 1) throw new BadRequestException('Quantity must be at least 1.');
   }
 
   /** Adds [qty] to the existing line (or creates it). */

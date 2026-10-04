@@ -51,5 +51,3 @@ export function checkTransition(action: OrderAction, current: OrderStatus, role:
   return { ok: true, to: rule.to };
 }
 
-/** Orders in these states hold reserved stock that must be returned on cancellation. */
-export const STOCK_RESERVED: OrderStatus[] = ['AWAITING_PAYMENT', 'PENDING', 'CONFIRMED', 'ASSIGNED', 'OUT_FOR_DELIVERY'];

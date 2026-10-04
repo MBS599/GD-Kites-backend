@@ -1,7 +1,7 @@
 import { PageQuery } from '../../common/paging';
 import { PartialType } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsInt, IsOptional, IsString, IsUrl, MaxLength, Min, MinLength, ValidateIf, IsBoolean } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, IsUrl, IsUUID, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 
 /**
  * Prices are whole rupees (stored as DECIMAL(10,2) so paise can be enabled
@@ -18,15 +18,17 @@ export class CreateProductDto {
 
   @IsOptional() @IsString() @MinLength(1) unit?: string;
 
-  @IsInt() @Min(1, { message: 'Minimum quantity must be at least 1.' }) minOrderQty: number;
+  /** Admin switch; customers can't order products that are out of stock. Default true. */
+  @IsOptional() @IsBoolean() inStock?: boolean;
 
-  /** Initial stock. After creation, change stock through the inventory endpoints. */
-  @IsInt() @Min(0, { message: 'Stock cannot be negative.' }) stock: number;
-
-  @IsOptional() @IsInt() @Min(0) lowStockThreshold?: number;
+  /** Damaged goods sold cheaply; listed in the "Damaged" section. */
+  @IsOptional() @IsBoolean() isDamaged?: boolean;
+  /** What is wrong with it, shown to customers. */
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() @MaxLength(300) damageNote?: string | null;
   @IsOptional() @IsString() @MaxLength(2000) description?: string;
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() material?: string | null;
-  @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() size?: string | null;
+  /** From the size master; null for none. */
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsUUID() sizeId?: string | null;
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsInt() @Min(1) slabQty?: number | null;
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsInt() @Min(1) slabPrice?: number | null;
 
@@ -42,6 +44,11 @@ export class ProductQuery extends PageQuery {
   @IsOptional() @IsString() @Transform(({ value }) => String(value).trim()) q?: string;
   @IsOptional() @IsString() category?: string;
 
-  /** Only products at or below their low-stock threshold. */
-  @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean() lowStock?: boolean;
+  /** true: only damaged products (the "Damaged" section); false: only regular ones; omit for all. */
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  damaged?: boolean;
+  /** Admin: only products switched to out of stock. */
+  @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean() outOfStock?: boolean;
 }

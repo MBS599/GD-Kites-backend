@@ -111,13 +111,6 @@ export const WA_TEMPLATES: Record<SmsEvent, WaTemplate> = {
     examples: ['GD1037', 'Mayur Traders', '1,457'],
     params: same,
   },
-  adminLowStock: {
-    name: 'gdk_admin_low_stock',
-    category: 'UTILITY',
-    body: 'Low stock: {{1}} has {{2}} left. Please restock soon.',
-    examples: ['Premium Fighter Kite', '140 piece'],
-    params: same,
-  },
   test: {
     name: 'gdk_test',
     category: 'UTILITY',

@@ -10,6 +10,7 @@ import type {
   Prisma,
   Product,
   ServiceArea,
+  Size,
   User,
   VehicleType,
 } from '@prisma/client';
@@ -34,7 +35,7 @@ export type DriverWithUser = DriverProfile & {
   serviceArea: ServiceArea | null;
   vehicleType: VehicleType | null;
 };
-export type ProductWithCategory = Product & { category: Category };
+export type ProductWithCategory = Product & { category: Category; size: Size | null };
 export type FullOrder = Order & {
   items: OrderItem[];
   history: OrderStatusHistory[];
@@ -43,7 +44,15 @@ export type FullOrder = Order & {
   payments?: Payment[];
 };
 
-export const productInclude = { category: true } as const;
+export const productInclude = { category: true, size: true } as const;
+
+/** What customers see: the name with its size, e.g. "Fighter Kite (Medium)". */
+export const productDisplayName = (p: { name: string; size?: { name: string } | null }) =>
+  p.size ? `${p.name} (${p.size.name})` : p.name;
+
+export function sizeOut(s: Size) {
+  return { id: s.id, name: s.name, sortOrder: s.sortOrder, isActive: s.isActive };
+}
 export const driverInclude = { user: true, serviceArea: true, vehicleType: true } as const;
 
 export function vehicleTypeOut(v: VehicleType) {
@@ -117,16 +126,18 @@ export function productOut(p: ProductWithCategory) {
   return {
     id: p.id,
     name: p.name,
+    /** Name with size, for customers and order lines. */
+    displayName: productDisplayName(p),
     category: p.category.slug,
     categoryName: p.category.name,
     price: m(p.price),
     unit: p.unit,
-    minOrderQty: p.minOrderQty,
-    stock: p.stock,
-    lowStockThreshold: p.lowStockThreshold,
+    inStock: p.inStock,
+    isDamaged: p.isDamaged,
+    damageNote: p.damageNote,
     description: p.description,
     material: p.material,
-    size: p.size,
+    size: p.size ? { id: p.size.id, name: p.size.name } : null,
     slabQty: p.slabQty,
     slabPrice: money(p.slabPrice),
     imageUrl: p.imageUrl,

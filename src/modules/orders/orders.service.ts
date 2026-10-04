@@ -3,8 +3,7 @@ import { BadRequestException, ConflictException, HttpException, HttpStatus, Inje
 import { Prisma, type OrderStatus } from '@prisma/client';
 import type { AuthUser } from '../../common/auth.decorators';
 import { lineTotal, unitPrice } from '../../common/pricing';
-import { orderInclude, orderOut, upperSnake, type FullOrder } from '../../common/serializers';
-import { STOCK_RESERVED } from '../../domain/orderStateMachine';
+import { orderInclude, orderOut, productDisplayName, upperSnake, type FullOrder } from '../../common/serializers';
 import { deliveryChargeFor, driverFareFor, etaMinutes } from '../../domain/pricing';
 import { PrismaService } from '../../prisma/prisma.service';
 import { deliveryTariffOf, driverTariffOf } from '../../common/rates';
@@ -16,7 +15,7 @@ import { DELIVERY_OTP_DIGITS, DELIVERY_OTP_MAX_ATTEMPTS } from '../deliveries/de
 const DELIVERY_OTP_RESEND_MS = 60_000;
 const DELIVERY_OTP_MAX_SENDS = 4;
 import { ServiceAreasService } from '../service-areas/service-areas.service';
-import { assertTransition, moveOrder, refreshDriverAvailability, releaseStock } from './order-workflow';
+import { assertTransition, moveOrder, refreshDriverAvailability } from './order-workflow';
 import { PaymentsService, type CheckoutSession } from '../payments/payments.service';
 
 @Injectable()
@@ -172,8 +171,8 @@ export class OrdersService {
 
   /**
    * Places an order from the customer's server-side cart in one transaction:
-   * validates MOQ, reserves stock atomically, snapshots prices + address,
-   * records history and inventory movements, then empties the cart.
+   * checks every product is in stock and the minimum order value, snapshots
+   * prices + address (product names include the size), then empties the cart.
    */
   async place(customer: AuthUser, addressId: string) {
     let awaiting = false;
@@ -185,46 +184,31 @@ export class OrdersService {
 
       const cart = await tx.cart.findUnique({
         where: { userId: customer.id },
-        include: { items: { include: { product: true }, orderBy: { addedAt: 'asc' } } },
+        include: { items: { include: { product: { include: { size: true } } }, orderBy: { addedAt: 'asc' } } },
       });
       const lines = cart?.items ?? [];
       if (lines.length === 0) throw new BadRequestException('Your cart is empty.');
 
       let subtotal = new Prisma.Decimal(0);
       const itemRows: Prisma.OrderItemCreateManyOrderInput[] = [];
-      const reserved: { productId: string; qty: number; stockAfter: number }[] = [];
 
       for (const { product: p, qty } of lines) {
-        if (!p.isActive) throw new BadRequestException(`${p.name} is no longer available. Remove it from your cart.`);
-        if (qty < p.minOrderQty) throw new BadRequestException(`${p.name}: minimum order is ${p.minOrderQty} ${p.unit}s.`);
-        let after;
-        try {
-          // Conditional update: fails if another order took the stock first.
-          after = await tx.product.update({
-            where: { id: p.id, stock: { gte: qty } },
-            data: { stock: { decrement: qty } },
-          });
-        } catch (e) {
-          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
-            const now = await tx.product.findUnique({ where: { id: p.id }, select: { stock: true } });
-            throw new ConflictException(`${p.name}: only ${now?.stock ?? 0} ${p.unit}s left in stock.`);
-          }
-          throw e;
-        }
+        const name = productDisplayName(p);
+        if (!p.isActive) throw new BadRequestException(`${name} is no longer available. Remove it from your cart.`);
+        if (!p.inStock) throw new ConflictException(`${name} is out of stock right now. Remove it from your cart.`);
         const total = lineTotal(p, qty);
         subtotal = subtotal.add(total);
         itemRows.push({
           productId: p.id,
-          productName: p.name,
+          productName: name,
           unit: p.unit,
           qty,
           unitPrice: unitPrice(p, qty),
           lineTotal: total,
         });
-        reserved.push({ productId: p.id, qty, stockAfter: after.stock });
       }
 
-      // Minimum order value (admin setting). Throwing here rolls back the stock just reserved.
+      // Minimum order value (admin setting).
       const settings = await tx.appSettings.findUnique({ where: { id: 1 }, select: { minOrderValue: true } });
       const minimum = settings?.minOrderValue ?? new Prisma.Decimal(1000);
       if (subtotal.lt(minimum)) {
@@ -270,16 +254,6 @@ export class OrdersService {
           history: { create: { status, actorId: customer.id } },
         },
       });
-      await tx.inventoryMovement.createMany({
-        data: reserved.map((r) => ({
-          productId: r.productId,
-          delta: -r.qty,
-          stockAfter: r.stockAfter,
-          reason: 'ORDER_RESERVED' as const,
-          orderId: created.id,
-          actorId: customer.id,
-        })),
-      });
       await tx.cartItem.deleteMany({ where: { cartId: cart!.id } });
       return created;
     });
@@ -291,9 +265,7 @@ export class OrdersService {
     }
     const full = await this.load(order.id);
     this.realtime.orderUpdated(full);
-    for (const i of full.items) this.realtime.catalogUpdated(i.productId);
     if (!awaiting) this.sms.orderPlaced(full); // otherwise sent once paid
-    await this.alertLowStock(full);
     return { order: orderOut(full), checkout };
   }
 
@@ -356,7 +328,6 @@ export class OrdersService {
       const o = await tx.order.findUniqueOrThrow({ where: { id }, include: { delivery: true } });
       const to = assertTransition(action, o.status, actor.role);
       await moveOrder(tx, id, o.status, to, actor.id, reason, { rejectionReason: reason });
-      if (STOCK_RESERVED.includes(o.status)) await releaseStock(tx, id, actor.id);
       if (o.delivery && o.delivery.status !== 'CANCELLED') {
         await tx.delivery.update({ where: { id: o.delivery.id }, data: { status: 'CANCELLED' } });
         revokedDriver = o.delivery.driverId;
@@ -376,16 +347,5 @@ export class OrdersService {
     this.realtime.orderUpdated(full);
     notify?.(full);
     return orderOut(full);
-  }
-
-  /** SMS admins about products this order pushed to (or below) their low-stock threshold. */
-  private async alertLowStock(o: FullOrder) {
-    const ordered = new Map<string, number>();
-    for (const i of o.items) ordered.set(i.productId, (ordered.get(i.productId) ?? 0) + i.qty);
-    const products = await this.prisma.product.findMany({ where: { id: { in: [...ordered.keys()] } } });
-    const crossed = products.filter(
-      (p) => p.stock <= p.lowStockThreshold && p.stock + (ordered.get(p.id) ?? 0) > p.lowStockThreshold,
-    );
-    if (crossed.length) this.sms.lowStock(crossed);
   }
 }

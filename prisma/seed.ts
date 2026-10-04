@@ -26,7 +26,6 @@ async function main() {
   await prisma.$transaction([
     prisma.smsMessage.deleteMany(),
     prisma.otpChallenge.deleteMany(),
-    prisma.inventoryMovement.deleteMany(),
     prisma.orderStatusHistory.deleteMany(),
     prisma.delivery.deleteMany(),
     prisma.orderItem.deleteMany(),
@@ -38,6 +37,7 @@ async function main() {
     prisma.vehicleType.deleteMany(),
     prisma.refreshToken.deleteMany(),
     prisma.product.deleteMany(),
+    prisma.size.deleteMany({ where: { name: { notIn: ['Small', 'Medium', 'Big'] } } }),
     prisma.category.deleteMany(),
     prisma.user.deleteMany(),
     prisma.serviceArea.deleteMany(),
@@ -77,65 +77,81 @@ async function main() {
     ),
   ) as Record<string, { id: string }>;
 
+  // ---- Sizes (also created by the migration) -------------------------------------
+  const sizes = Object.fromEntries(
+    await Promise.all(
+      (['Small', 'Medium', 'Big'] as const).map(async (name, i) => [
+        name,
+        await prisma.size.upsert({ where: { name }, create: { name, sortOrder: i }, update: { sortOrder: i, isActive: true } }),
+      ]),
+    ),
+  ) as Record<'Small' | 'Medium' | 'Big', { id: string }>;
+
   // ---- Products -----------------------------------------------------------------
   const mkProduct = (
-    data: Omit<Prisma.ProductUncheckedCreateInput, 'price' | 'slabPrice' | 'categoryId'> & {
+    data: Omit<Prisma.ProductUncheckedCreateInput, 'price' | 'slabPrice' | 'categoryId' | 'sizeId'> & {
       category: string;
       price: number;
       slabPrice?: number;
+      size?: 'Small' | 'Medium' | 'Big';
     },
   ) => {
-    const { category, price, slabPrice, ...rest } = data;
+    const { category, price, slabPrice, size, ...rest } = data;
     return prisma.product.create({
       data: {
         ...rest,
         categoryId: cat[category].id,
+        sizeId: size ? sizes[size].id : null,
         price: D(price),
         slabPrice: slabPrice == null ? null : D(slabPrice),
-        inventoryLog: { create: { delta: rest.stock, stockAfter: rest.stock, reason: 'INITIAL' } },
       },
     });
   };
 
   const p = {
     fighter: await mkProduct({
-      name: 'Premium Fighter Kite', category: 'fighterKites', price: 25, minOrderQty: 50, stock: 2500,
-      material: 'Kite paper + bamboo', size: 'Medium — 60 × 55 cm', slabQty: 500, slabPrice: 23,
-      rating: 4.6, buyerCount: 128, description: 'Balanced fighter kite with seasoned bamboo spine. Sold in bundles of 50.',
+      name: 'Premium Fighter Kite', category: 'fighterKites', price: 25,
+      material: 'Kite paper + bamboo', size: 'Medium', slabQty: 500, slabPrice: 23,
+      rating: 4.6, buyerCount: 128, description: 'Balanced fighter kite with seasoned bamboo spine.',
     }),
     designer: await mkProduct({
-      name: 'Designer Kite — Printed', category: 'designerKites', price: 40, minOrderQty: 100, stock: 1200,
-      material: 'Printed kite paper', size: 'Medium — 60 × 55 cm', slabQty: 1000, slabPrice: 37,
+      name: 'Designer Kite — Printed', category: 'designerKites', price: 40,
+      material: 'Printed kite paper', size: 'Medium', slabQty: 1000, slabPrice: 37,
       rating: 4.4, buyerCount: 86, description: 'Colour-printed festival designs, assorted patterns.',
     }),
     manjha: await mkProduct({
-      name: 'Bareilly Manjha 9 Cord', category: 'manjha', price: 180, unit: 'reel', minOrderQty: 20, stock: 140,
-      material: 'Cotton, glass coated', size: '1000 m reel', rating: 4.7, buyerCount: 64, lowStockThreshold: 150,
+      name: 'Bareilly Manjha 9 Cord', category: 'manjha', price: 180, unit: 'reel',
+      material: 'Cotton, glass coated', rating: 4.7, buyerCount: 64,
       description: 'Traditional Bareilly manjha, 9 cord strength.',
     }),
     charkha: await mkProduct({
-      name: 'Wooden Charkha 12 in.', category: 'accessories', price: 120, minOrderQty: 10, stock: 640,
-      material: 'Sheesham wood', size: '12 inch', rating: 4.3, buyerCount: 41, lowStockThreshold: 50,
+      name: 'Wooden Charkha 12 in.', category: 'accessories', price: 120,
+      material: 'Sheesham wood', rating: 4.3, buyerCount: 41,
       description: 'Hand-turned wooden spool with steel axle.',
     }),
     paperLarge: await mkProduct({
-      name: 'Paper Fighter Kite — Large', category: 'fighterKites', price: 32, minOrderQty: 50, stock: 1800,
-      material: 'Kite paper + bamboo', size: 'Large — 75 × 70 cm', rating: 4.5, buyerCount: 52,
-      description: 'Large size fighter kite in kite paper with seasoned bamboo spine. Sold in bundles of 50.',
+      name: 'Paper Fighter Kite — Large', category: 'fighterKites', price: 32,
+      material: 'Kite paper + bamboo', size: 'Big', rating: 4.5, buyerCount: 52,
+      description: 'Large size fighter kite in kite paper with seasoned bamboo spine.',
     }),
     tukkal: await mkProduct({
-      name: 'Tukkal Kite', category: 'designerKites', price: 55, minOrderQty: 50, stock: 600,
-      material: 'Kite paper + bamboo', size: 'Large — 90 × 80 cm', rating: 4.2, buyerCount: 23,
+      name: 'Tukkal Kite', category: 'designerKites', price: 55,
+      material: 'Kite paper + bamboo', size: 'Big', rating: 4.2, buyerCount: 23,
       description: 'Traditional tailed tukkal kite for steady flying.',
     }),
     cottonManjha: await mkProduct({
-      name: 'Cotton Manjha 6 Cord', category: 'manjha', price: 120, unit: 'reel', minOrderQty: 20, stock: 420,
-      material: 'Cotton', size: '900 m reel', rating: 4.1, buyerCount: 30, lowStockThreshold: 100,
+      name: 'Cotton Manjha 6 Cord', category: 'manjha', price: 120, unit: 'reel', inStock: false,
+      material: 'Cotton', rating: 4.1, buyerCount: 30,
       description: 'Everyday cotton manjha, 6 cord.',
     }),
+    seconds: await mkProduct({
+      name: 'Fighter Kite — Seconds', category: 'fighterKites', price: 12, size: 'Medium', isDamaged: true,
+      damageNote: 'Small tears and faded colours; flies fine.', material: 'Kite paper + bamboo', buyerCount: 9,
+      description: 'Damaged stock at a low price.',
+    }),
     tape: await mkProduct({
-      name: 'Kite Repair Tape', category: 'accessories', price: 15, unit: 'roll', minOrderQty: 25, stock: 900,
-      size: '18 mm × 20 m', rating: 4.0, buyerCount: 18, lowStockThreshold: 100,
+      name: 'Kite Repair Tape', category: 'accessories', price: 15, unit: 'roll',
+      rating: 4.0, buyerCount: 18,
       description: 'Transparent tape for quick kite repairs.',
     }),
   };
@@ -256,7 +272,6 @@ async function main() {
           : {}),
       },
     });
-    // Stock for open orders is reserved (already reflected in seeded stock levels).
     return order;
   };
 

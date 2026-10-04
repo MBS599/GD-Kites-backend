@@ -151,11 +151,6 @@ export class SmsService {
     this.toUser(user, 'driverWelcome', [user.name.split(' ')[0], user.email ?? 'your mobile number']);
   }
 
-  /** Products that just dropped to/below their low-stock threshold. */
-  lowStock(products: Pick<Product, 'name' | 'stock' | 'unit'>[]) {
-    for (const p of products) this.toAdmins('adminLowStock', [p.name, `${p.stock} ${p.unit}`]);
-  }
-
   /** Admin test from Settings; bypasses dedupe and opt-out, waits for the result. */
   async sendTest(phone: string, userId: string) {
     const to = normalizeIndianMobile(phone);

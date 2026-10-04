@@ -14,7 +14,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   }
 
   /**
-   * Transaction for critical sections. Stock and status changes use
+   * Transaction for critical sections. Status changes use
    * conditional updates (`updateMany ... where`) so READ COMMITTED is safe.
    */
   tx<T>(fn: (tx: Tx) => Promise<T>) {

@@ -15,7 +15,7 @@ import type { Env } from '../../config/env';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { SmsService } from '../sms/sms.service';
-import { moveOrder, releaseStock } from '../orders/order-workflow';
+import { moveOrder } from '../orders/order-workflow';
 import { RazorpayClient, RazorpayError, type RzpPayment } from './razorpay.client';
 import { SettingsService } from '../settings/settings.controller';
 import { onlineChargesFor } from '../../domain/pricing';
@@ -250,7 +250,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Cancels orders whose time to pay is over and releases their stock. Asks
+   * Cancels orders whose time to pay is over. Asks
    * Razorpay first, so a payment whose callback was lost is not thrown away.
    */
   async expireStale(now = new Date()) {
@@ -281,7 +281,6 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       try {
         await this.prisma.tx(async (tx) => {
           await moveOrder(tx, o.id, 'AWAITING_PAYMENT', 'CANCELLED', null, reason, { rejectionReason: reason });
-          await releaseStock(tx, o.id, null);
         });
       } catch (e) {
         if (e instanceof ConflictException) continue; // paid meanwhile
@@ -290,7 +289,6 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       cancelled++;
       const full = await this.load(o.id);
       this.realtime.orderUpdated(full);
-      for (const i of full.items) this.realtime.catalogUpdated(i.productId);
       this.sms.orderCancelled(full, reason, null);
     }
     return cancelled;

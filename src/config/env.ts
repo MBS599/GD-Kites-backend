@@ -71,7 +71,7 @@ const schema = z
     RAZORPAY_KEY_SECRET: z.string().default(''),
     /** Razorpay dashboard → Webhooks: the secret you set for POST /api/v1/webhooks/razorpay. */
     RAZORPAY_WEBHOOK_SECRET: z.string().default(''),
-    /** Unpaid orders are cancelled (stock released) after this many minutes. */
+    /** Unpaid orders are cancelled after this many minutes. */
     PAYMENT_TIMEOUT_MIN: z.coerce.number().int().min(5).max(1440).default(15),
     HUB_LAT: z.coerce.number().default(18.4866),
     HUB_LNG: z.coerce.number().default(73.8656),

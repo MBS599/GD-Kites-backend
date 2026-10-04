@@ -199,7 +199,7 @@ describe('GD Kite Center API (e2e)', () => {
       ['get', '/admin/dashboard'],
       ['get', '/reports/sales'],
       ['get', '/drivers'],
-      ['get', '/inventory'],
+      ['post', '/sizes'],
       ['post', '/products'],
       ['get', '/deliveries'],
     ])('customer cannot %s %s', async (method, path) => {
@@ -215,7 +215,7 @@ describe('GD Kite Center API (e2e)', () => {
   describe('catalogue & cart', () => {
     it('lists products with search and category filter', async () => {
       const all = await http.get(`${API}/products`).set(auth(customer)).expect(200);
-      expect(all.body.products.length).toBe(8);
+      expect(all.body.products.length).toBe(9);
       const manjha = await http.get(`${API}/products?category=manjha`).set(auth(customer)).expect(200);
       expect(manjha.body.products.every((p: any) => p.category === 'manjha')).toBe(true);
       const q = await http.get(`${API}/products?q=tukkal`).set(auth(customer)).expect(200);
@@ -224,24 +224,77 @@ describe('GD Kite Center API (e2e)', () => {
       expect(cats.body.categories.map((c: any) => c.slug)).toEqual(['fighterKites', 'designerKites', 'manjha', 'accessories']);
     });
 
-    it('enforces MOQ and stock in the cart and prices on the server', async () => {
+    it('takes any quantity of in-stock products and prices them on the server', async () => {
       const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      expect(kite).toMatchObject({ inStock: true, size: { name: 'Medium' }, displayName: 'Premium Fighter Kite (Medium)' });
       await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
-      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 10 }).expect(400);
-      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 999999 }).expect(400);
-      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 300 }).expect(201);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 0 }).expect(400);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 3 }).expect(201); // no per-product minimum
+      await http.patch(`${API}/cart/items/${kite.id}`).set(auth(customer)).send({ qty: 300 }).expect(200);
       const cart = await http.patch(`${API}/cart/items/${kite.id}`).set(auth(customer)).send({ qty: 600 }).expect(200);
       expect(cart.body.cart.items[0].unitPrice).toBe(23); // slab above 500
       expect(cart.body.cart.subtotal).toBe(600 * 23);
       const removed = await http.delete(`${API}/cart/items/${kite.id}`).set(auth(customer)).expect(200);
       expect(removed.body.cart.itemCount).toBe(0);
     });
+
+    it('out-of-stock products can be seen but not added or ordered', async () => {
+      const manjha = (await http.get(`${API}/products?q=Cotton%20Manjha`).set(auth(customer))).body.products[0];
+      expect(manjha.inStock).toBe(false);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: manjha.id, qty: 5 }).expect(400);
+
+      // Switched off while it sits in a cart: the cart says so and checkout refuses.
+      const tape = (await http.get(`${API}/products?q=tape`).set(auth(customer))).body.products[0];
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: tape.id, qty: 5 }).expect(201);
+      await http.patch(`${API}/products/${tape.id}`).set(auth(customer)).send({ inStock: false }).expect(403);
+      await http.patch(`${API}/products/${tape.id}`).set(auth(admin)).send({ inStock: false }).expect(200);
+      try {
+        const cart = (await http.get(`${API}/cart`).set(auth(customer)).expect(200)).body.cart;
+        expect(cart.items[0].outOfStock).toBe(true);
+        expect(cart.isValid).toBe(false);
+        const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+        const res = await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(409);
+        expect(res.body.error.message).toContain('out of stock');
+        const outOnly = (await http.get(`${API}/products`).set(auth(admin)).query({ outOfStock: true }).expect(200)).body.products;
+        expect(outOnly.map((p: any) => p.id)).toEqual(expect.arrayContaining([manjha.id, tape.id]));
+        expect(outOnly.every((p: any) => !p.inStock)).toBe(true);
+      } finally {
+        await http.patch(`${API}/products/${tape.id}`).set(auth(admin)).send({ inStock: true }).expect(200);
+        await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
+      }
+    });
+
+    it('damaged products have their own section with a note', async () => {
+      const damaged = (await http.get(`${API}/products`).set(auth(customer)).query({ damaged: true }).expect(200)).body.products;
+      expect(damaged.length).toBeGreaterThan(0);
+      expect(damaged.every((p: any) => p.isDamaged)).toBe(true);
+      expect(damaged[0].damageNote).toBeTruthy();
+      const regular = (await http.get(`${API}/products`).set(auth(customer)).query({ damaged: false, limit: 100 }).expect(200)).body.products;
+      expect(regular.some((p: any) => p.isDamaged)).toBe(false);
+    });
+
+    it('admins manage the size master; the size shows in the product and order name', async () => {
+      const sizes = (await http.get(`${API}/sizes`).set(auth(customer)).expect(200)).body.sizes;
+      expect(sizes.map((x: any) => x.name)).toEqual(['Small', 'Medium', 'Big']);
+      await http.post(`${API}/sizes`).set(auth(customer)).send({ name: 'Jumbo' }).expect(403);
+      const jumbo = (await http.post(`${API}/sizes`).set(auth(admin)).send({ name: 'Jumbo' }).expect(201)).body.size;
+      expect(jumbo.sortOrder).toBe(3);
+      await http.post(`${API}/sizes`).set(auth(admin)).send({ name: 'Jumbo' }).expect(409);
+      await http.patch(`${API}/sizes/${jumbo.id}`).set(auth(admin)).send({ isActive: false }).expect(200);
+      expect((await http.get(`${API}/sizes`).set(auth(customer))).body.sizes.map((x: any) => x.name)).not.toContain('Jumbo');
+      expect((await http.get(`${API}/sizes`).set(auth(admin)).query({ all: true })).body.sizes.map((x: any) => x.name)).toContain('Jumbo');
+      // Hidden sizes can't be given to products.
+      await http
+        .post(`${API}/products`)
+        .set(auth(admin))
+        .send({ name: 'Jumbo Kite', category: 'fighterKites', price: 50, sizeId: jumbo.id })
+        .expect(400);
+    });
   });
 
   describe('full order lifecycle across roles', () => {
     let orderId: string;
     let kiteId: string;
-    let stockBefore: number;
     let socket: Socket;
     const events: string[] = [];
 
@@ -264,9 +317,6 @@ describe('GD Kite Center API (e2e)', () => {
         const res = await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(422);
         expect(res.body.error.code).toBe('below_minimum_order');
         expect(res.body.error.details.shortBy).toBeGreaterThan(0);
-        // Nothing was reserved.
-        const after = (await http.get(`${API}/products/${kite.id}`).set(auth(customer)).expect(200)).body.product;
-        expect(after.stock).toBe(kite.stock);
       } finally {
         await http.delete(`${API}/cart/items/${kite.id}`).set(auth(customer));
         await http.patch(`${API}/settings`).set(auth(admin)).send({ minOrderValue: 0 }).expect(200);
@@ -276,7 +326,6 @@ describe('GD Kite Center API (e2e)', () => {
     it('places an order from the cart in one transaction', async () => {
       const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
       kiteId = kite.id;
-      stockBefore = kite.stock;
       const addresses = (await http.get(`${API}/addresses`).set(auth(customer)).expect(200)).body.addresses;
       await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kiteId, qty: 100 }).expect(201);
 
@@ -287,13 +336,10 @@ describe('GD Kite Center API (e2e)', () => {
       expect(order.subtotal).toBe(2500);
       expect(order.total).toBe(order.subtotal + order.deliveryCharge);
 
-      const after = (await http.get(`${API}/products/${kiteId}`).set(auth(customer))).body.product;
-      expect(after.stock).toBe(stockBefore - 100);
+      // Order lines carry the name with its size.
+      expect(order.items[0].name).toBe('Premium Fighter Kite (Medium)');
       const cart = (await http.get(`${API}/cart`).set(auth(customer))).body.cart;
       expect(cart.itemCount).toBe(0);
-      const moves = await prisma.inventoryMovement.findMany({ where: { orderId } });
-      expect(moves).toHaveLength(1);
-      expect(moves[0].delta).toBe(-100);
     });
 
     it('rejects an empty-cart checkout', async () => {
@@ -667,10 +713,9 @@ describe('GD Kite Center API (e2e)', () => {
       const body = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(201)).body;
       return { ...body, productId: kite.id as string };
     };
-    const stockOf = async (id: string) => (await prisma.product.findUniqueOrThrow({ where: { id } })).stock;
 
     it('customer pays only the delivery charge online; the rest is cash on delivery', async () => {
-      const { order, checkout, productId } = await placeUnpaid();
+      const { order, checkout } = await placeUnpaid();
       expect(order.status).toBe('awaitingPayment');
       expect(order.paymentDueBy).toEqual(expect.any(String));
       // Amount comes from the server's order, in paise.
@@ -684,7 +729,6 @@ describe('GD Kite Center API (e2e)', () => {
       expect(checkout.prefill.contact).toBeTruthy();
       // Not visible to the admin as a real order yet.
       await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(409);
-      const stockHeld = await stockOf(productId);
 
       // Reopening checkout reuses the same Razorpay order; other customers cannot.
       const again = (await http.post(`${API}/orders/${order.id}/payment`).set(auth(customer)).expect(200)).body.checkout;
@@ -712,7 +756,6 @@ describe('GD Kite Center API (e2e)', () => {
       expect(paid.dueOnDelivery).toBe(order.subtotal);
       expect(paid.payment).toMatchObject({ status: 'paid', method: 'upi', reference: 'pay_E2E1', amount: online });
       expect(rzp.capture).toHaveBeenCalledWith('pay_E2E1', checkout.amount);
-      expect(await stockOf(productId)).toBe(stockHeld);
 
       // Verify + webhook both arriving is harmless.
       await http.post(`${API}/orders/${order.id}/payment/verify`).set(auth(customer)).send(verify).expect(200);
@@ -733,7 +776,6 @@ describe('GD Kite Center API (e2e)', () => {
       expect(rzp.refund).toHaveBeenCalledWith('pay_E2E1', checkout.amount, expect.any(Object));
       expect(cancelled.payment.status).toBe('refunded');
       expect(cancelled.paidOnline).toBe(0);
-      expect(await stockOf(productId)).toBe(stockHeld + 50);
     });
 
     it('the Razorpay webhook alone confirms a payment (app closed before returning)', async () => {
@@ -760,21 +802,19 @@ describe('GD Kite Center API (e2e)', () => {
       await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
     });
 
-    it('unpaid orders are cancelled after the time limit and their stock is released', async () => {
-      const { order, productId } = await placeUnpaid();
-      const held = await stockOf(productId);
+    it('unpaid orders are cancelled after the time limit', async () => {
+      const { order } = await placeUnpaid();
       await prisma.order.update({ where: { id: order.id }, data: { paymentDueBy: new Date(Date.now() - 1000) } });
       expect(await app.get(PaymentsService).expireStale()).toBeGreaterThanOrEqual(1);
       const now = (await http.get(`${API}/orders/${order.id}`).set(auth(customer)).expect(200)).body.order;
       expect(now.status).toBe('cancelled');
       expect(now.rejectionReason).toContain('Payment not completed');
-      expect(await stockOf(productId)).toBe(held + 50);
       await http.post(`${API}/orders/${order.id}/payment`).set(auth(customer)).expect(409);
     });
   });
 
-  describe('cancellation & inventory', () => {
-    it('admin reject returns reserved stock and frees the driver', async () => {
+  describe('cancellation', () => {
+    it('admin reject frees the driver', async () => {
       const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
       const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
       await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
@@ -784,8 +824,6 @@ describe('GD Kite Center API (e2e)', () => {
       const rej = await http.post(`${API}/orders/${order.id}/reject`).set(auth(admin)).send({ reason: 'Customer asked' }).expect(200);
       expect(rej.body.order.status).toBe('cancelled');
       expect(rej.body.order.driver).toBeNull();
-      const after = (await http.get(`${API}/products/${kite.id}`).set(auth(customer))).body.product;
-      expect(after.stock).toBe(kite.stock);
       await http.get(`${API}/deliveries/${order.id}`).set(auth(otherDriver)).expect(404);
     });
 
@@ -796,15 +834,6 @@ describe('GD Kite Center API (e2e)', () => {
       const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id })).body.order;
       await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
       await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(409);
-    });
-
-    it('admin stock adjustment is atomic and audited', async () => {
-      const tape = (await http.get(`${API}/products?q=tape`).set(auth(admin))).body.products[0];
-      await http.post(`${API}/inventory/${tape.id}/adjust`).set(auth(admin)).send({ delta: -999999, reason: 'Oops' }).expect(400);
-      const res = await http.post(`${API}/inventory/${tape.id}/adjust`).set(auth(admin)).send({ delta: 100, reason: 'Supplier delivery' }).expect(201);
-      expect(res.body.product.stock).toBe(tape.stock + 100);
-      const moves = (await http.get(`${API}/inventory/${tape.id}/movements`).set(auth(admin)).expect(200)).body.movements;
-      expect(moves[0]).toMatchObject({ delta: 100, reason: 'ADMIN_ADJUSTMENT' });
     });
   });
 
@@ -991,12 +1020,21 @@ describe('GD Kite Center API (e2e)', () => {
       const created = await http
         .post(`${API}/products`)
         .set(auth(admin))
-        .send({ name: 'Test Kite', category: 'fighterKites', price: 30, minOrderQty: 10, stock: 100, slabQty: 100, slabPrice: 28 })
+        .send({ name: 'Test Kite', category: 'fighterKites', price: 30, slabQty: 100, slabPrice: 28 })
         .expect(201);
       const id = created.body.product.id;
       await http.patch(`${API}/products/${id}`).set(auth(admin)).send({ slabPrice: 35 }).expect(400); // must be below price
-      const upd = await http.patch(`${API}/products/${id}`).set(auth(admin)).send({ price: 32, stock: 150 }).expect(200);
-      expect(upd.body.product).toMatchObject({ price: 32, stock: 150 });
+      expect(created.body.product).toMatchObject({ inStock: true, isDamaged: false, size: null, displayName: 'Test Kite' });
+      const big = (await http.get(`${API}/sizes`).set(auth(admin))).body.sizes.find((x: any) => x.name === 'Big');
+      const upd = await http
+        .patch(`${API}/products/${id}`)
+        .set(auth(admin))
+        .send({ price: 32, sizeId: big.id, isDamaged: true, damageNote: 'Bent spine' })
+        .expect(200);
+      expect(upd.body.product).toMatchObject({ price: 32, displayName: 'Test Kite (Big)', isDamaged: true, damageNote: 'Bent spine' });
+      // Back to regular stock: the damage note goes away.
+      const fixed = await http.patch(`${API}/products/${id}`).set(auth(admin)).send({ isDamaged: false }).expect(200);
+      expect(fixed.body.product).toMatchObject({ isDamaged: false, damageNote: null });
       await http.delete(`${API}/products/${id}`).set(auth(admin)).expect(204);
       await http.get(`${API}/products/${id}`).set(auth(customer)).expect(404);
     });

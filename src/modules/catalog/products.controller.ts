@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, Roles, type AuthUser } from '../../common/auth.decorators';
+import { Roles } from '../../common/auth.decorators';
 import { CreateProductDto, ProductQuery, UpdateProductDto } from './products.dto';
 import { ProductsService } from './products.service';
 
@@ -10,7 +10,7 @@ import { ProductsService } from './products.service';
 export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
-  /** Active catalogue with search (`q`) and category slug filter. */
+  /** Active catalogue with search (`q`), category slug, `damaged` and `outOfStock` filters. */
   @Get()
   async list(@Query() q: ProductQuery) {
     const page = await this.products.list(q);
@@ -24,14 +24,14 @@ export class ProductsController {
 
   @Roles('ADMIN')
   @Post()
-  async create(@Body() dto: CreateProductDto, @CurrentUser() user: AuthUser) {
-    return { product: await this.products.create(dto, user.id) };
+  async create(@Body() dto: CreateProductDto) {
+    return { product: await this.products.create(dto) };
   }
 
   @Roles('ADMIN')
   @Patch(':id')
-  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateProductDto, @CurrentUser() user: AuthUser) {
-    return { product: await this.products.update(id, dto, user.id) };
+  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateProductDto) {
+    return { product: await this.products.update(id, dto) };
   }
 
   @Roles('ADMIN')

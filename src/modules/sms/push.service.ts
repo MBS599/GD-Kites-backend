@@ -27,7 +27,6 @@ const PUSH: Partial<Record<SmsEvent, (v: string[]) => Omit<PushMessage, 'data'>>
   deliveryAssigned: ([code, name, area]) => ({ title: 'New delivery', body: `${code} for ${name}, ${area}` }),
   deliveryRemoved: ([code]) => ({ title: 'Delivery removed', body: `${code} is no longer assigned to you.` }),
   adminNewOrder: ([code, name, amount]) => ({ title: 'New order', body: `${code} from ${name} · Rs ${amount}` }),
-  adminLowStock: ([name, qty]) => ({ title: 'Low stock', body: `${name}: ${qty} left` }),
 };
 
 export function pushFor(event: SmsEvent, vars: string[], orderId?: string): PushMessage | null {

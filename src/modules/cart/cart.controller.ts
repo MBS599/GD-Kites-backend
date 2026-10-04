@@ -25,7 +25,7 @@ export class CartController {
     return this.cart.get(user.id);
   }
 
-  /** Adds to the existing quantity. Validates minimum order and stock. */
+  /** Adds to the existing quantity. The product must be in stock. */
   @Post('items')
   add(@CurrentUser() user: AuthUser, @Body() dto: AddCartItemDto) {
     return this.cart.add(user.id, dto.productId, dto.qty);

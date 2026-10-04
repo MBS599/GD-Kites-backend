@@ -18,7 +18,7 @@ export class AdminController {
     const yesterday = startOfYesterday();
     const live = { status: { not: 'CANCELLED' as const } };
 
-    const [salesToday, salesYesterday, totalSales, ordersToday, pending, awaitingDriver, activeDeliveries, completedToday, lowStock] =
+    const [salesToday, salesYesterday, totalSales, ordersToday, pending, awaitingDriver, activeDeliveries, completedToday] =
       await Promise.all([
         this.prisma.order.aggregate({ where: { ...live, placedAt: { gte: today } }, _sum: { total: true } }),
         this.prisma.order.aggregate({ where: { ...live, placedAt: { gte: yesterday, lt: today } }, _sum: { total: true } }),
@@ -27,9 +27,7 @@ export class AdminController {
         this.prisma.order.count({ where: { status: 'PENDING' } }),
         this.prisma.order.count({ where: { status: 'CONFIRMED' } }),
         this.prisma.order.count({ where: { status: { in: ['ASSIGNED', 'OUT_FOR_DELIVERY'] } } }),
-        this.prisma.order.count({ where: { status: 'DELIVERED', deliveredAt: { gte: today } } }),
-        this.prisma.$queryRaw<{ count: bigint }[]>`
-          SELECT COUNT(*)::bigint AS count FROM "Product" WHERE "isActive" = true AND "stock" <= "lowStockThreshold"`,
+        this.prisma.order.count({ where: { status: 'DELIVERED', deliveredAt: { gte: today } } })
       ]);
 
     const t = salesToday._sum.total?.toNumber() ?? 0;
@@ -45,7 +43,6 @@ export class AdminController {
         awaitingDriver,
         activeDeliveries,
         completedToday,
-        lowStockProducts: Number(lowStock[0]?.count ?? 0),
       },
     };
   }

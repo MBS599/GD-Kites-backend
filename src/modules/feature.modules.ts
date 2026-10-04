@@ -9,7 +9,7 @@ import { PhoneOtpService } from './auth/phone-otp.service';
 import { CartController } from './cart/cart.controller';
 import { CartService } from './cart/cart.service';
 import { CategoriesController } from './catalog/categories.controller';
-import { InventoryController } from './catalog/inventory.controller';
+import { SizesController } from './catalog/sizes.controller';
 import { ProductsController } from './catalog/products.controller';
 import { ProductsService } from './catalog/products.service';
 import { DeliveriesController } from './deliveries/deliveries.controller';
@@ -83,9 +83,9 @@ export class GeoModule {}
 @Module({ controllers: [AddressesController] })
 export class AddressesModule {}
 
-/** Categories, products, inventory and product image uploads. */
+/** Categories, sizes, products and product image uploads. */
 @Module({
-  controllers: [CategoriesController, ProductsController, InventoryController, UploadsController],
+  controllers: [CategoriesController, SizesController, ProductsController, UploadsController],
   providers: [ProductsService],
 })
 export class CatalogModule {}

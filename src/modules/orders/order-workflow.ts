@@ -38,14 +38,3 @@ export async function refreshDriverAvailability(tx: Tx, driverId: string) {
   if (driver.availability === next) return driver;
   return tx.driverProfile.update({ where: { id: driverId }, data: { availability: next }, include: driverInclude });
 }
-
-/** Returns reserved stock for every line of an order and logs it. */
-export async function releaseStock(tx: Tx, orderId: string, actorId: string | null) {
-  const items = await tx.orderItem.findMany({ where: { orderId } });
-  for (const i of items) {
-    const p = await tx.product.update({ where: { id: i.productId }, data: { stock: { increment: i.qty } } });
-    await tx.inventoryMovement.create({
-      data: { productId: i.productId, delta: i.qty, stockAfter: p.stock, reason: 'ORDER_RELEASED', orderId, actorId },
-    });
-  }
-}
