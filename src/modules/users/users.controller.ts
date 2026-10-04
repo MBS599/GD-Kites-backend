@@ -1,7 +1,8 @@
 import { Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { OrderStatus } from '@prisma/client';
-import { IsOptional, IsString, Matches, MinLength, ValidateIf, IsBoolean } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf, IsBoolean } from 'class-validator';
 import { CurrentUser, type AuthUser } from '../../common/auth.decorators';
 import { userOut } from '../../common/serializers';
 import { PHONE_MSG, PHONE_RE } from '../../common/validation';
@@ -9,6 +10,13 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { normalizeIndianMobile } from '../sms/sms.service';
 
 export class UpdateProfileDto {
+  /** Customers who signed up with a mobile number add their email (Google accounts keep Google's). */
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsEmail({}, { message: 'Enter a valid email address.' })
+  @MaxLength(120)
+  email?: string;
+
   @IsOptional()
   @IsString()
   @MinLength(2)
@@ -50,9 +58,21 @@ export class UsersController {
     if (changed && user.phoneVerified && !user.googleSub) {
       throw new ConflictException('Your mobile number is how you sign in. Contact GD Kite Center to change it.');
     }
+    let email: string | undefined;
+    if (dto.email !== undefined) {
+      if (user.role !== 'CUSTOMER') throw new ForbiddenException('Staff emails are managed by an admin.');
+      // Only an email the customer typed in can be set or changed; a Google account's email is its sign-in.
+      if (user.googleSub || (user.email && !user.emailUnverified)) {
+        throw new ConflictException('Your email comes from your Google account.');
+      }
+      email = dto.email.trim().toLowerCase();
+      const taken = await this.prisma.user.findFirst({ where: { email, id: { not: user.id } }, select: { id: true } });
+      if (taken) throw new ConflictException('This email is already used by another account.');
+    }
     const updated = await this.prisma.user.update({
       where: { id: user.id },
       data: {
+        ...(email !== undefined ? { email, emailUnverified: true } : {}),
         name: dto.name?.trim(),
         phone: dto.phone?.trim(),
         phoneVerified: changed ? null : undefined,

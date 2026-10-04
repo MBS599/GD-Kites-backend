@@ -77,7 +77,11 @@ export class AuthService {
       where: { email: identity.email },
       include: { driverProfile: true },
     });
-    if (existing) {
+    if (existing?.emailUnverified) {
+      // Someone typed this address into a mobile-number account without proving it.
+      // The Google account's owner gets their own account; the unproven address is dropped.
+      await this.prisma.user.update({ where: { id: existing.id }, data: { email: null, emailUnverified: false } });
+    } else if (existing) {
       if (!existing.isActive) throw new ForbiddenException('This account has been deactivated.');
       if (existing.googleSub && existing.googleSub !== identity.sub) {
         throw new UnauthorizedException('This email is linked to a different Google account.');

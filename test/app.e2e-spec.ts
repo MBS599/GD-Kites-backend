@@ -46,6 +46,11 @@ describe('GD Kite Center API (e2e)', () => {
       .overrideProvider(GoogleVerifier)
       .useValue({
         verify: async (token: string) => {
+          // "google:<email>" signs in as that Google account (tests of email linking).
+          if (token.startsWith('google:')) {
+            const email = token.slice('google:'.length);
+            return { sub: `google-sub-${email}`, email, name: 'Google Owner' };
+          }
           if (token !== 'valid-google-token-new-user') throw new (await import('@nestjs/common')).UnauthorizedException('bad');
           return { sub: 'google-sub-123', email: 'new.shop@example.com', name: 'New Shop' };
         },
@@ -170,6 +175,31 @@ describe('GD Kite Center API (e2e)', () => {
       await http.post(`${API}/auth/phone/verify`).set(auth(s)).send({ phone: '9811122233', code: '123456' }).expect(400);
       // Order updates now reach that number.
       expect((await http.get(`${API}/auth/me`).set(auth(s)).expect(200)).body.user.phone).toBe('+91 98111 22233');
+    });
+
+    it('mobile-number customers add an email; a typed email never opens to Google sign-in', async () => {
+      // A customer who signed up with a mobile number: no email yet.
+      const sai = await prisma.user.create({
+        data: { name: 'Sai Email Test', phone: '+91 90000 11111', phoneVerified: '919000011111', role: 'CUSTOMER', cart: { create: {} } },
+        include: { driverProfile: true },
+      });
+      expect(sai.email).toBeNull();
+      const { refreshTokenId: _, ...s } = await app.get(AuthService).startSession(sai);
+      await http.patch(`${API}/users/me`).set(auth(s)).send({ email: 'not-an-email' }).expect(400);
+      await http.patch(`${API}/users/me`).set(auth(s)).send({ email: 'mayur.traders@gmail.com' }).expect(409);
+      const ok = (await http.patch(`${API}/users/me`).set(auth(s)).send({ email: ' Sai.Kites@Example.com ' }).expect(200)).body.user;
+      expect(ok.email).toBe('sai.kites@example.com');
+
+      // The real owner of that Gmail signs in with Google: they get their own account,
+      // not Sai's; the unproven address comes off Sai's account.
+      const owner = (await http.post(`${API}/auth/google`).send({ idToken: 'google:sai.kites@example.com' }).expect(200)).body.user;
+      expect(owner.id).not.toBe(sai.id);
+      expect(owner.email).toBe('sai.kites@example.com');
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: sai.id } })).email).toBeNull();
+
+      // Google accounts and staff can't change their email here.
+      await http.patch(`${API}/users/me`).set(auth(customer)).send({ email: 'x@example.com' }).expect(409);
+      await http.patch(`${API}/users/me`).set(auth(driver)).send({ email: 'x@example.com' }).expect(403);
     });
 
     it('rotates refresh tokens and revokes the family on reuse', async () => {

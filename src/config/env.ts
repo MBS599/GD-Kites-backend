@@ -28,6 +28,8 @@ const schema = z
     NOMINATIM_URL: z.string().default('https://nominatim.openstreetmap.org'),
     /** Nominatim policy requires an identifying User-Agent with contact info. */
     GEOCODER_USER_AGENT: z.string().default('GDKites/1.0 (+https://gdkites.in)'),
+    /** India Post PIN code directory (free, no key): checks/finds PIN codes for addresses. */
+    INDIA_POST_URL: z.string().default('https://api.postalpincode.in'),
     /** Road routing / trip optimisation. `osrm` now; `google` reserved for the Routes API later. */
     ROUTING_PROVIDER: z.enum(['osrm']).default('osrm'),
     OSRM_URL: z.string().default('https://router.project-osrm.org'),
