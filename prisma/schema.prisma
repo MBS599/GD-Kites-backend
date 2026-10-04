@@ -124,6 +124,8 @@ model AppSettings {
   deliveryGstPercent Float    @default(18)
   /// Online payment: Razorpay fee % passed to the customer (0 = the business absorbs it).
   gatewayFeePercent  Float    @default(2)
+  /// Smallest cart subtotal (goods only, before delivery) a customer can order, in rupees.
+  minOrderValue      Decimal  @default(1000) @db.Decimal(10, 2)
   /// Business number linked to WhatsApp (QR scan), e.g. 919822011122. Shown to users as the shop's
   /// contact number; null while no phone is linked, and then no contact number is shown anywhere.
   whatsappNumber     String?

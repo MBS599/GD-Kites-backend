@@ -16,10 +16,12 @@ export class RealtimeService {
   }
 
   orderUpdated(order: FullOrder) {
-    const rooms = ['admins', `user:${order.customerId}`];
+    // Only admins get the driver's position; the customer and driver get the order without it.
+    this.server?.to('admins').emit('order:updated', { order: orderOut(order, { driverLocation: true }) });
+    const rooms = [`user:${order.customerId}`];
     const d = order.delivery;
     if (d && d.status !== 'CANCELLED') rooms.push(`driver:${d.driverId}`);
-    this.server?.to(rooms).emit('order:updated', { order: orderOut(order) });
+    this.server?.to(rooms).except('admins').emit('order:updated', { order: orderOut(order) });
   }
 
   /** Tell a previously assigned driver the order is no longer theirs. */
@@ -35,8 +37,8 @@ export class RealtimeService {
     this.server?.to(['admins', `driver:${driver.id}`]).emit('driver:updated', { driver: driverOut(driver) });
   }
 
-  driverLocation(driverId: string, customerIds: string[], payload: { lat: number; lng: number; at: string }) {
-    const rooms = ['admins', ...customerIds.map((id) => `user:${id}`)];
-    this.server?.to(rooms).emit('driver:location', { driverId, ...payload });
+  /** Live positions go to admins only (and back to the driver's own devices). */
+  driverLocation(driverId: string, payload: { lat: number; lng: number; at: string }) {
+    this.server?.to(['admins', `driver:${driverId}`]).emit('driver:location', { driverId, ...payload });
   }
 }

@@ -17,6 +17,12 @@ export class SettingsService {
     return this.prisma.appSettings.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
   }
 
+  /** Smallest cart subtotal a customer can order, in rupees (0 = none). */
+  async minOrderValue(): Promise<number> {
+    const s = await this.prisma.appSettings.findUnique({ where: { id: 1 }, select: { minOrderValue: true } });
+    return s ? s.minOrderValue.toNumber() : 1000;
+  }
+
   /** The WhatsApp-linked business number as +91…, or null when no phone is linked. */
   async contactNumber(): Promise<string | null> {
     const s = await this.prisma.appSettings.findUnique({ where: { id: 1 }, select: { whatsappNumber: true } });
@@ -35,6 +41,8 @@ export class UpdateSettingsDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(28) deliveryGstPercent?: number;
   /** Online payment: Razorpay fee % passed to the customer (0 = absorbed). Default 2. */
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(5) gatewayFeePercent?: number;
+  /** Smallest cart value (goods, before delivery) in rupees. 0 = no minimum. Default 1000. */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(10_000_000) minOrderValue?: number;
 }
 
 const out = (s: AppSettings) => ({
@@ -43,6 +51,7 @@ const out = (s: AppSettings) => ({
   dispatchMaxOrders: s.dispatchMaxOrders,
   deliveryGstPercent: s.deliveryGstPercent,
   gatewayFeePercent: s.gatewayFeePercent,
+  minOrderValue: s.minOrderValue.toNumber(),
 });
 
 @ApiTags('Settings')

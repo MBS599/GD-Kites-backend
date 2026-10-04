@@ -103,6 +103,8 @@ export class AuthController {
       otpLogin: this.phoneOtp.enabled,
       otpChannel: this.phoneOtp.channel,
       supportPhone: linked ? await this.settings.contactNumber() : null,
+      /** Smallest cart value (goods, before delivery) in rupees; 0 = no minimum. */
+      minOrderValue: await this.settings.minOrderValue(),
     };
   }
 

@@ -188,7 +188,11 @@ export function driverOut(d: DriverWithUser, counts?: { activeDeliveries?: numbe
   };
 }
 
-export function orderOut(o: FullOrder) {
+/**
+ * [driverLocation]: include the delivery person's last position — for admins only.
+ * Customers follow their order by status; drivers do bulk runs with many stops.
+ */
+export function orderOut(o: FullOrder, { driverLocation = false }: { driverLocation?: boolean } = {}) {
   const d = o.delivery;
   const activeDelivery = d && d.status !== 'CANCELLED' ? d : null;
   return {
@@ -232,7 +236,9 @@ export function orderOut(o: FullOrder) {
       contactPhone: o.contactPhone,
     },
     etaMinutes: etaMinutes(o.distanceKm),
-    driver: activeDelivery ? driverOut(activeDelivery.driver) : null,
+    driver: activeDelivery
+      ? { ...driverOut(activeDelivery.driver), ...(driverLocation ? {} : { lastLocation: null }) }
+      : null,
     driverFare: activeDelivery ? m(activeDelivery.fare) : null,
     deliveryStatus: d ? camel(d.status) : null,
     rejectionReason: o.rejectionReason,

@@ -79,10 +79,9 @@ export class DriversService {
     return out;
   }
 
-  /** Stores the latest position and forwards it to admins and customers with an order on the road. */
   /**
-   * Stores and broadcasts a driver position. Ignored while the driver is
-   * offline — drivers are only tracked when on duty.
+   * Stores a driver position and sends it to admins. Ignored while the driver is
+   * offline — drivers are only tracked when on duty. Customers never see it.
    */
   async updateLocation(driverId: string, lat: number, lng: number) {
     const at = new Date();
@@ -91,15 +90,7 @@ export class DriversService {
       data: { lastLat: lat, lastLng: lng, lastLocationAt: at },
     });
     if (count === 0) return null;
-    const onRoad = await this.prisma.delivery.findMany({
-      where: { driverId, status: 'IN_TRANSIT' },
-      select: { order: { select: { customerId: true } } },
-    });
-    this.realtime.driverLocation(
-      driverId,
-      onRoad.map((d) => d.order.customerId),
-      { lat, lng, at: at.toISOString() },
-    );
+    this.realtime.driverLocation(driverId, { lat, lng, at: at.toISOString() });
     return { lat, lng, at: at.toISOString() };
   }
 
@@ -134,7 +125,7 @@ export class DriversService {
     const [out] = await this.withCounts([driver]);
     return {
       driver: out,
-      orders: orders.map(orderOut),
+      orders: orders.map((o) => orderOut(o)),
       totals: { completedDeliveries: done._count._all, totalFares: Number(done._sum.fare ?? 0) },
     };
   }

@@ -43,7 +43,7 @@ export class DeliveriesService {
       orderBy: { placedAt: 'desc' },
       take: 100,
     })) as FullOrder[];
-    return orders.map(orderOut);
+    return orders.map((o) => orderOut(o));
   }
 
   async detail(driverId: string, orderId: string) {

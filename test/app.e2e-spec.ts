@@ -77,6 +77,8 @@ describe('GD Kite Center API (e2e)', () => {
     admin = await login('admin@gdkitecenter.in');
     driver = await login('rahul.patil@gdkitecenter.in');
     otherDriver = await login('suresh.more@gdkitecenter.in');
+    // Most tests place small orders; the minimum order value has its own test.
+    await prisma.appSettings.upsert({ where: { id: 1 }, create: { id: 1, minOrderValue: 0 }, update: { minOrderValue: 0 } });
   });
 
   afterAll(async () => {
@@ -249,6 +251,27 @@ describe('GD Kite Center API (e2e)', () => {
       socket.on('order:updated', (e: any) => events.push(e.order.status));
     });
     afterAll(() => socket.close());
+
+    it('refuses carts below the minimum order value set by the admin', async () => {
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer)).expect(200)).body.addresses;
+      await http.patch(`${API}/settings`).set(auth(customer)).send({ minOrderValue: 1 }).expect(403);
+      const set = (await http.patch(`${API}/settings`).set(auth(admin)).send({ minOrderValue: 1_000_000 }).expect(200)).body;
+      expect(set.settings.minOrderValue).toBe(1_000_000);
+      expect((await http.get(`${API}/auth/config`).expect(200)).body.minOrderValue).toBe(1_000_000);
+      try {
+        await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 100 }).expect(201);
+        const res = await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(422);
+        expect(res.body.error.code).toBe('below_minimum_order');
+        expect(res.body.error.details.shortBy).toBeGreaterThan(0);
+        // Nothing was reserved.
+        const after = (await http.get(`${API}/products/${kite.id}`).set(auth(customer)).expect(200)).body.product;
+        expect(after.stock).toBe(kite.stock);
+      } finally {
+        await http.delete(`${API}/cart/items/${kite.id}`).set(auth(customer));
+        await http.patch(`${API}/settings`).set(auth(admin)).send({ minOrderValue: 0 }).expect(200);
+      }
+    });
 
     it('places an order from the cart in one transaction', async () => {
       const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
@@ -1050,6 +1073,13 @@ describe('GD Kite Center API (e2e)', () => {
       const list = (await http.get(`${API}/drivers`).set(auth(admin)).expect(200)).body.drivers;
       const suresh = list.find((d: any) => d.name.startsWith('Suresh'));
       expect(suresh.lastLocation).toMatchObject({ lat: 18.51, lng: 73.86 });
+      // Customers follow orders by status only: their orders never carry the driver's position.
+      await http.post(`${API}/drivers/me/location`).set(auth(driver)).send({ lat: 18.5, lng: 73.85 });
+      const mine = (await http.get(`${API}/orders`).set(auth(customer)).query({ limit: 100 }).expect(200)).body.orders;
+      expect(mine.some((o: any) => o.driver)).toBe(true);
+      expect(mine.every((o: any) => !o.driver || o.driver.lastLocation === null)).toBe(true);
+      const withDriver = mine.find((o: any) => o.driver);
+      expect((await http.get(`${API}/orders/${withDriver.id}`).set(auth(customer)).expect(200)).body.order.driver.lastLocation).toBeNull();
 
       await http.patch(`${API}/drivers/me/availability`).set(auth(otherDriver)).send({ availability: 'offline' }).expect(200);
       await http.post(`${API}/drivers/me/location`).set(auth(otherDriver)).send({ lat: 18.6, lng: 73.9 }).expect(409);

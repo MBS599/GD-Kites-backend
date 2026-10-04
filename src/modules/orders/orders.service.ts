@@ -1,5 +1,5 @@
 import { pageArgs, toPage, type PageQuery } from '../../common/paging';
-import { BadRequestException, ConflictException, HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, HttpStatus, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Prisma, type OrderStatus } from '@prisma/client';
 import type { AuthUser } from '../../common/auth.decorators';
 import { lineTotal, unitPrice } from '../../common/pricing';
@@ -85,7 +85,8 @@ export class OrdersService {
       ...args,
     })) as FullOrder[];
     const page = toPage(orders, limit);
-    return { items: page.items.map(orderOut), nextCursor: page.nextCursor };
+    const admin = user.role === 'ADMIN';
+    return { items: page.items.map((o) => orderOut(o, { driverLocation: admin })), nextCursor: page.nextCursor };
   }
 
   async get(user: AuthUser, id: string) {
@@ -93,7 +94,11 @@ export class OrdersService {
     if (!o || !this.canView(user, o)) throw new NotFoundException('Order not found.');
     const customerOrderCount =
       user.role === 'ADMIN' ? await this.prisma.order.count({ where: { customerId: o.customerId } }) : undefined;
-    return { order: orderOut(o), customerOrderCount, deliveryOtp: this.visibleOtp(user, o) };
+    return {
+      order: orderOut(o, { driverLocation: user.role === 'ADMIN' }),
+      customerOrderCount,
+      deliveryOtp: this.visibleOtp(user, o),
+    };
   }
 
   /**
@@ -217,6 +222,18 @@ export class OrdersService {
           lineTotal: total,
         });
         reserved.push({ productId: p.id, qty, stockAfter: after.stock });
+      }
+
+      // Minimum order value (admin setting). Throwing here rolls back the stock just reserved.
+      const settings = await tx.appSettings.findUnique({ where: { id: 1 }, select: { minOrderValue: true } });
+      const minimum = settings?.minOrderValue ?? new Prisma.Decimal(1000);
+      if (subtotal.lt(minimum)) {
+        const short = minimum.sub(subtotal);
+        throw new UnprocessableEntityException({
+          message: `Minimum order value is ₹${minimum.toNumber().toLocaleString('en-IN')}. Add ₹${short.toNumber().toLocaleString('en-IN')} more to place this order.`,
+          code: 'below_minimum_order',
+          details: { minOrderValue: minimum.toNumber(), shortBy: short.toNumber() },
+        });
       }
 
       const deliveryCharge = new Prisma.Decimal(deliveryChargeFor(coverage.distanceKm, deliveryTariffOf(coverage.area)));
