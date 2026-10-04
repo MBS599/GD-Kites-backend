@@ -1148,6 +1148,15 @@ describe('GD Kite Center API (e2e)', () => {
       expect(month.sales).toBeGreaterThanOrEqual(d.sales);
       expect(month.completed).toBeGreaterThan(d.completed);
       expect(month.deliveryEarnings).toBeCloseTo(month.deliveryCharges - month.driverFares, 2);
+      // Trend: 24 hours for a day, one bar per day for a month; it adds up to the sales figure.
+      expect(d.trendUnit).toBe('hour');
+      expect(d.trend).toHaveLength(24);
+      expect(month.trendUnit).toBe('day');
+      expect(month.trend).toHaveLength(31);
+      expect(month.trend[30].key).toBe(day(0));
+      expect(month.trend.reduce((t: number, b: any) => t + b.sales, 0)).toBeCloseTo(month.sales, 2);
+      expect(month.topProducts.length).toBeGreaterThan(0);
+      expect(month.customers).toBeGreaterThan(0);
       await http.get(`${API}/admin/dashboard`).set(auth(admin)).query({ from: day(0), to: day(5) }).expect(400);
       await http.get(`${API}/admin/dashboard`).set(auth(admin)).query({ from: '04-10-2026' }).expect(400);
       const sales = (await http.get(`${API}/reports/sales`).set(auth(admin)).expect(200)).body;

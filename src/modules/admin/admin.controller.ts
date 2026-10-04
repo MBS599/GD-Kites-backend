@@ -6,6 +6,34 @@ import { istDateKey, istDayStart, startOfToday } from '../../common/time';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const IST_OFFSET_MS = 330 * 60 * 1000;
+
+type TrendUnit = 'hour' | 'day' | 'month';
+
+/**
+ * Bucket keys covering [start, end) in IST: `YYYY-MM-DDTHH` (hour),
+ * `YYYY-MM-DD` (day) or `YYYY-MM` (month) — the same strings the SQL returns.
+ */
+function trendKeys(start: Date, end: Date, unit: TrendUnit): string[] {
+  const keys: string[] = [];
+  const d = new Date(start.getTime() + IST_OFFSET_MS); // IST wall clock, read with UTC getters
+  const stop = end.getTime() + IST_OFFSET_MS;
+  while (d.getTime() < stop) {
+    const iso = d.toISOString();
+    if (unit === 'hour') {
+      keys.push(iso.slice(0, 13));
+      d.setUTCHours(d.getUTCHours() + 1);
+    } else if (unit === 'day') {
+      keys.push(iso.slice(0, 10));
+      d.setUTCDate(d.getUTCDate() + 1);
+    } else {
+      keys.push(iso.slice(0, 7));
+      d.setUTCDate(1);
+      d.setUTCMonth(d.getUTCMonth() + 1);
+    }
+  }
+  return keys;
+}
 
 export class DashboardQuery {
   /** First IST calendar day of the period (YYYY-MM-DD). Defaults to today. */
@@ -65,6 +93,31 @@ export class AdminController {
       FROM "OrderItem" i JOIN "Order" o ON o.id = i."orderId"
       WHERE o.status <> 'CANCELLED' AND o."placedAt" >= ${start} AND o."placedAt" < ${end}`;
 
+    // Sales trend: hourly for one day, daily up to ~2 months, monthly beyond.
+    const days = Math.round((end.getTime() - start.getTime()) / DAY_MS);
+    const unit: TrendUnit = days <= 1 ? 'hour' : days <= 62 ? 'day' : 'month';
+    const fmt = unit === 'hour' ? 'YYYY-MM-DD"T"HH24' : unit === 'day' ? 'YYYY-MM-DD' : 'YYYY-MM';
+    const [buckets, top, customers] = await Promise.all([
+      this.prisma.$queryRaw<{ k: string; sales: string; orders: number }[]>`
+        SELECT to_char(date_trunc(${unit}, o."placedAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata'), ${fmt}) AS k,
+               SUM(o.total)::text AS sales, COUNT(*)::int AS orders
+        FROM "Order" o
+        WHERE o.status <> 'CANCELLED' AND o."placedAt" >= ${start} AND o."placedAt" < ${end}
+        GROUP BY 1`,
+      this.prisma.$queryRaw<{ name: string; qty: number; revenue: string }[]>`
+        SELECT i."productName" AS name, SUM(i.qty)::int AS qty, SUM(i."lineTotal")::text AS revenue
+        FROM "OrderItem" i JOIN "Order" o ON o.id = i."orderId"
+        WHERE o.status <> 'CANCELLED' AND o."placedAt" >= ${start} AND o."placedAt" < ${end}
+        GROUP BY i."productName" ORDER BY SUM(i."lineTotal") DESC LIMIT 5`,
+      this.prisma.order.findMany({ where: { ...live, placedAt: inPeriod }, distinct: ['customerId'], select: { customerId: true } }),
+    ]);
+    const byKey = new Map(buckets.map((b) => [b.k, b]));
+    const trend = trendKeys(start, end, unit).map((k) => ({
+      key: k,
+      sales: Number(byKey.get(k)?.sales ?? 0),
+      orders: byKey.get(k)?.orders ?? 0,
+    }));
+
     const s = sales._sum.total?.toNumber() ?? 0;
     const p = previousSales._sum.total?.toNumber() ?? 0;
     const deliveryCharges = delivered._sum.deliveryCharge?.toNumber() ?? 0;
@@ -90,6 +143,13 @@ export class AdminController {
         pending,
         awaitingDriver,
         activeDeliveries,
+        /** Customers who ordered in the period. */
+        customers: customers.length,
+        /** Sales per hour / day / month across the period (zero-filled). */
+        trendUnit: unit,
+        trend,
+        /** Best sellers in the period by revenue. */
+        topProducts: top.map((t) => ({ name: t.name, qty: t.qty, revenue: Number(t.revenue) })),
       },
     };
   }
