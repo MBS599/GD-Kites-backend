@@ -122,7 +122,8 @@ export function categoryOut(c: Category) {
   return { id: c.id, slug: c.slug, name: c.name, sortOrder: c.sortOrder };
 }
 
-export function productOut(p: ProductWithCategory) {
+/** [cost]: include the cost price — admins only, never customers. */
+export function productOut(p: ProductWithCategory, { cost = false }: { cost?: boolean } = {}) {
   return {
     id: p.id,
     name: p.name,
@@ -131,6 +132,7 @@ export function productOut(p: ProductWithCategory) {
     category: p.category.slug,
     categoryName: p.category.name,
     price: m(p.price),
+    ...(cost ? { costPrice: money(p.costPrice) } : {}),
     unit: p.unit,
     inStock: p.inStock,
     isDamaged: p.isDamaged,

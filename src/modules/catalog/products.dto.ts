@@ -1,7 +1,7 @@
 import { PageQuery } from '../../common/paging';
 import { PartialType } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsString, IsUrl, IsUUID, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, IsUrl, IsUUID, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 
 /**
  * Prices are whole rupees (stored as DECIMAL(10,2) so paise can be enabled
@@ -13,8 +13,17 @@ export class CreateProductDto {
   /** Category slug, e.g. "fighterKites". */
   @IsString() category: string;
 
-  @IsInt({ message: 'Price must be a whole number of rupees.' }) @Min(1, { message: 'Price must be greater than 0.' })
+  /** Rupees, up to 2 decimals (paise), e.g. 9.2. */
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'Price can have at most 2 decimals.' })
+  @Min(0.01, { message: 'Price must be greater than 0.' })
   price: number;
+
+  /** What the business pays per unit (admin only; for profit). Null clears it. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  costPrice?: number | null;
 
   @IsOptional() @IsString() @MinLength(1) unit?: string;
 
@@ -30,7 +39,7 @@ export class CreateProductDto {
   /** From the size master; null for none. */
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsUUID() sizeId?: string | null;
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsInt() @Min(1) slabQty?: number | null;
-  @IsOptional() @ValidateIf((_, v) => v !== null) @IsInt() @Min(1) slabPrice?: number | null;
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) slabPrice?: number | null;
 
   @IsOptional()
   @ValidateIf((_, v) => v !== null)

@@ -1137,14 +1137,59 @@ describe('GD Kite Center API (e2e)', () => {
     });
 
     it('dashboard and reports return numbers', async () => {
+      // Default period: today (IST).
       const d = (await http.get(`${API}/admin/dashboard`).set(auth(admin)).expect(200)).body.stats;
-      expect(d.completedToday).toBeGreaterThanOrEqual(1);
+      expect(d.period.from).toBe(d.period.to);
+      expect(d.completed).toBeGreaterThanOrEqual(1);
+      // Custom range: the last 30 days include the older seeded deliveries.
+      const day = (offset: number) => new Date(Date.now() + 330 * 60_000 - offset * 86_400_000).toISOString().slice(0, 10);
+      const month = (await http.get(`${API}/admin/dashboard`).set(auth(admin)).query({ from: day(30), to: day(0) }).expect(200)).body.stats;
+      expect(month.period).toEqual({ from: day(30), to: day(0) });
+      expect(month.sales).toBeGreaterThanOrEqual(d.sales);
+      expect(month.completed).toBeGreaterThan(d.completed);
+      expect(month.deliveryEarnings).toBeCloseTo(month.deliveryCharges - month.driverFares, 2);
+      await http.get(`${API}/admin/dashboard`).set(auth(admin)).query({ from: day(0), to: day(5) }).expect(400);
+      await http.get(`${API}/admin/dashboard`).set(auth(admin)).query({ from: '04-10-2026' }).expect(400);
       const sales = (await http.get(`${API}/reports/sales`).set(auth(admin)).expect(200)).body;
       expect(sales.totals.orders).toBeGreaterThan(0);
       const top = (await http.get(`${API}/reports/products`).set(auth(admin)).expect(200)).body.products;
       expect(top[0].qty).toBeGreaterThan(0);
       const drivers = (await http.get(`${API}/reports/drivers`).set(auth(admin)).expect(200)).body.drivers;
       expect(drivers.find((x: any) => x.name === 'Rahul Patil').deliveries).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('prices with paise, cost price and profit', () => {
+    it('stores paise, hides the cost from customers and reports profit', async () => {
+      const big = (await http.get(`${API}/sizes`).set(auth(admin))).body.sizes.find((x: any) => x.name === 'Big');
+      const created = (
+        await http
+          .post(`${API}/products`)
+          .set(auth(admin))
+          .send({ name: 'Pona', category: 'fighterKites', price: 9.2, costPrice: 7.5, sizeId: big.id })
+          .expect(201)
+      ).body.product;
+      expect(created).toMatchObject({ price: 9.2, costPrice: 7.5, displayName: 'Pona (Big)' });
+      await http.post(`${API}/products`).set(auth(admin)).send({ name: 'X', category: 'manjha', price: 1.234 }).expect(400);
+
+      // Customers never see the cost.
+      const seen = (await http.get(`${API}/products/${created.id}`).set(auth(customer)).expect(200)).body.product;
+      expect(seen.price).toBe(9.2);
+      expect(seen).not.toHaveProperty('costPrice');
+      expect((await http.get(`${API}/products/${created.id}`).set(auth(admin))).body.product.costPrice).toBe(7.5);
+
+      const day = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+      const before = (await http.get(`${API}/admin/dashboard`).set(auth(admin)).query({ from: day })).body.stats;
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: created.id, qty: 200 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(201)).body.order;
+      expect(order.subtotal).toBe(1840);
+      const after = (await http.get(`${API}/admin/dashboard`).set(auth(admin)).query({ from: day })).body.stats;
+      expect(after.profit - before.profit).toBeCloseTo(200 * (9.2 - 7.5), 2);
+      expect(after.costedSales - before.costedSales).toBeCloseTo(1840, 2);
+      await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
+      await http.delete(`${API}/products/${created.id}`).set(auth(admin)).expect(204);
     });
   });
 

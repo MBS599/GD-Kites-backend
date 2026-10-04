@@ -205,6 +205,7 @@ export class OrdersService {
           qty,
           unitPrice: unitPrice(p, qty),
           lineTotal: total,
+          unitCost: p.costPrice,
         });
       }
 

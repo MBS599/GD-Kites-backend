@@ -13,7 +13,7 @@ export class ProductsService {
     private readonly realtime: RealtimeService,
   ) {}
 
-  async list(q: ProductQuery) {
+  async list(q: ProductQuery, admin = false) {
     const { limit, args } = pageArgs(q);
     const products = await this.prisma.product.findMany({
       where: {
@@ -38,13 +38,13 @@ export class ProductsService {
       ...args,
     });
     const page = toPage(products, limit);
-    return { items: page.items.map(productOut), nextCursor: page.nextCursor };
+    return { items: page.items.map((p) => productOut(p, { cost: admin })), nextCursor: page.nextCursor };
   }
 
-  async get(id: string) {
+  async get(id: string, admin = false) {
     const p = await this.prisma.product.findFirst({ where: { id, isActive: true }, include: productInclude });
     if (!p) throw new NotFoundException('Product not found.');
-    return productOut(p);
+    return productOut(p, { cost: admin });
   }
 
   private async categoryId(slug: string) {
@@ -75,6 +75,7 @@ export class ProductsService {
         categoryId: await this.categoryId(dto.category),
         sizeId: (await this.sizeId(dto.sizeId)) ?? null,
         price: new Prisma.Decimal(dto.price),
+        costPrice: dto.costPrice == null ? null : new Prisma.Decimal(dto.costPrice),
         unit: dto.unit?.trim() || 'piece',
         inStock: dto.inStock ?? true,
         isDamaged: dto.isDamaged ?? false,
@@ -88,7 +89,7 @@ export class ProductsService {
       include: productInclude,
     });
     this.realtime.catalogUpdated(p.id);
-    return productOut(p);
+    return productOut(p, { cost: true });
   }
 
   /** Updates only the fields given. */
@@ -108,6 +109,7 @@ export class ProductsService {
         categoryId: dto.category ? await this.categoryId(dto.category) : undefined,
         sizeId: dto.sizeId === undefined || dto.sizeId === existing.sizeId ? undefined : await this.sizeId(dto.sizeId),
         price: dto.price !== undefined ? new Prisma.Decimal(dto.price) : undefined,
+        costPrice: dto.costPrice === undefined ? undefined : dto.costPrice === null ? null : new Prisma.Decimal(dto.costPrice),
         unit: dto.unit?.trim(),
         inStock: dto.inStock,
         isDamaged: dto.isDamaged,
@@ -121,7 +123,7 @@ export class ProductsService {
       include: productInclude,
     });
     this.realtime.catalogUpdated(p.id);
-    return productOut(p);
+    return productOut(p, { cost: true });
   }
 
   /** Soft delete; also removes it from every cart. */

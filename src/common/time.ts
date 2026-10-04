@@ -17,3 +17,8 @@ export function startOfYesterday(now = new Date()): Date {
 export function istDateKey(d: Date): string {
   return new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
 }
+
+/** Start (as a UTC Date) of the IST calendar day given as YYYY-MM-DD. */
+export function istDayStart(key: string): Date {
+  return new Date(new Date(`${key}T00:00:00.000Z`).getTime() - IST_OFFSET_MS);
+}
