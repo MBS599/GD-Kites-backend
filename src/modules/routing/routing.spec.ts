@@ -75,6 +75,39 @@ describe('routing', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('ends the trip at the hub when asked: return leg split off, totals include it', async () => {
+    const roundTrip = {
+      ...osrmTrip,
+      waypoints: [...osrmTrip.waypoints, { waypoint_index: 4, trips_index: 0 }],
+      trips: [
+        {
+          ...osrmTrip.trips[0],
+          distance: 10941 + 3500,
+          duration: 1054 + 420,
+          legs: [...osrmTrip.trips[0].legs, { distance: 3500, duration: 420 }],
+        },
+      ],
+    };
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => roundTrip }) as never;
+    const trip = await new OsrmPlanner('https://osrm.example').planTrip(hub, [katraj, bibwewadi, swargate], hub);
+    expect(trip.order).toEqual([2, 1, 0]);
+    expect(trip.legs).toHaveLength(3);
+    expect(trip.returnLeg).toEqual({ distanceKm: 3.5, durationMin: 7 });
+    expect(trip.totalDistanceKm).toBe(14.4);
+    const url = String((global.fetch as jest.Mock).mock.calls[0][0]);
+    expect(url).toContain('destination=last');
+    expect(url.split(';')).toHaveLength(5); // origin, 3 stops, hub
+  });
+
+  it('fallback also drives back to the hub', () => {
+    const trip = nearestNeighbourTrip(hub, [katraj, swargate], hub);
+    expect(trip.returnLeg!.distanceKm).toBeGreaterThan(0);
+    const legsKm = trip.legs.reduce((s, l) => s + l.distanceKm, 0) + trip.returnLeg!.distanceKm;
+    expect(trip.totalDistanceKm).toBeCloseTo(legsKm, 1);
+    expect(trip.geometry[trip.geometry.length - 1]).toEqual(hub);
+    expect(nearestNeighbourTrip(hub, [katraj]).returnLeg).toBeNull();
+  });
+
   it('nearest-neighbour visits every stop exactly once', () => {
     const trip = nearestNeighbourTrip(hub, [katraj, swargate, bibwewadi]);
     expect([...trip.order].sort()).toEqual([0, 1, 2]);

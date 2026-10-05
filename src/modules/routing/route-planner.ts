@@ -11,9 +11,12 @@ export interface PlannedTrip {
   order: number[];
   /** Per visited stop (same order as `order`): distance/time of the leg arriving there. */
   legs: { distanceKm: number; durationMin: number }[];
+  /** Last stop → `end` (e.g. back to the hub), when an end was given. */
+  returnLeg: { distanceKm: number; durationMin: number } | null;
+  /** Whole trip, including `returnLeg`. */
   totalDistanceKm: number;
   totalDurationMin: number;
-  /** Road-following polyline from origin through all stops. */
+  /** Road-following polyline from origin through all stops (and on to `end`). */
   geometry: LatLng[];
   /** False when the fallback heuristic was used (provider unavailable). */
   optimized: boolean;
@@ -23,8 +26,12 @@ export interface PlannedTrip {
 /** Road routing provider. OSRM today; a Google Routes implementation can be added later. */
 export interface RoutePlanner {
   readonly name: string;
-  /** Best open trip starting at `origin` visiting every stop once (ending anywhere). */
-  planTrip(origin: LatLng, stops: LatLng[]): Promise<PlannedTrip>;
+  /**
+   * Best trip starting at `origin` that visits every stop once, then goes to
+   * `end` (e.g. back to the hub) — or ends at the last stop when `end` is omitted.
+   * The stop order is chosen with the final leg included.
+   */
+  planTrip(origin: LatLng, stops: LatLng[], end?: LatLng): Promise<PlannedTrip>;
 }
 
 const ROAD_FACTOR = 1.3;
@@ -34,7 +41,7 @@ const AVG_KMPH = 22;
  * Offline fallback: greedy nearest-neighbour on straight-line distance with a
  * road factor. Used when the routing provider is unreachable.
  */
-export function nearestNeighbourTrip(origin: LatLng, stops: LatLng[]): PlannedTrip {
+export function nearestNeighbourTrip(origin: LatLng, stops: LatLng[], end?: LatLng): PlannedTrip {
   const remaining = stops.map((_, i) => i);
   const order: number[] = [];
   const legs: PlannedTrip['legs'] = [];
@@ -51,12 +58,19 @@ export function nearestNeighbourTrip(origin: LatLng, stops: LatLng[]): PlannedTr
     order.push(next);
     from = stops[next];
   }
+  let returnLeg: PlannedTrip['returnLeg'] = null;
+  if (end && stops.length) {
+    const km = Math.round(haversineKm(from.lat, from.lng, end.lat, end.lng) * ROAD_FACTOR * 10) / 10;
+    returnLeg = { distanceKm: km, durationMin: Math.max(1, Math.round((km / AVG_KMPH) * 60)) };
+  }
+  const all = returnLeg ? [...legs, returnLeg] : legs;
   return {
     order,
     legs,
-    totalDistanceKm: Math.round(legs.reduce((s, l) => s + l.distanceKm, 0) * 10) / 10,
-    totalDurationMin: legs.reduce((s, l) => s + l.durationMin, 0),
-    geometry: [origin, ...order.map((i) => stops[i])],
+    returnLeg,
+    totalDistanceKm: Math.round(all.reduce((s, l) => s + l.distanceKm, 0) * 10) / 10,
+    totalDurationMin: all.reduce((s, l) => s + l.durationMin, 0),
+    geometry: [origin, ...order.map((i) => stops[i]), ...(returnLeg && end ? [end] : [])],
     optimized: false,
     provider: 'fallback',
   };

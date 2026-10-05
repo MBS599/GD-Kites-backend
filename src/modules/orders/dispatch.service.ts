@@ -63,7 +63,8 @@ export class DispatchService {
       for (const idx of indexGroups) {
         const members = idx.map((i) => areaOrders[i]);
         const stops = idx.map((i) => points[i]);
-        const trip = await this.routing.planTrip(hub, stops);
+        // Round trip: out from the hub, every stop, back to the hub.
+        const trip = await this.routing.planTrip(hub, stops, hub);
         const ordered = trip.order.map((i) => members[i]);
         const candidates = drivers.filter((d) => (areaId === 'none' || d.serviceAreaId === areaId) && !taken.has(d.id));
         const ranked = this.rank(candidates, stops, hub, opts.maxPerDriver);
@@ -85,8 +86,10 @@ export class DispatchService {
           })),
           hub,
           route: {
+            // Totals include the drive back to the hub (`returnDistanceKm`).
             distanceKm: round1(trip.totalDistanceKm),
             durationMin: Math.round(trip.totalDurationMin),
+            returnDistanceKm: round1(trip.returnLeg?.distanceKm ?? 0),
             geometry: trip.geometry,
             optimized: trip.optimized,
           },

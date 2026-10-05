@@ -1010,6 +1010,13 @@ describe('GD Kite Center API (e2e)', () => {
       expect(r.geometry.length).toBeGreaterThanOrEqual(2);
       // Arrival times are cumulative.
       for (let i = 1; i < r.stops.length; i++) expect(r.stops[i].arrivalMinutes).toBeGreaterThanOrEqual(r.stops[i - 1].arrivalMinutes);
+      // The route ends back at the hub, after the last delivery, and the totals include that drive.
+      const back = r.returnToHub;
+      expect(back.name).toBeTruthy();
+      expect(back.distanceKm).toBeGreaterThan(0);
+      expect(back.arrivalMinutes).toBeGreaterThanOrEqual(r.stops[r.stops.length - 1].arrivalMinutes);
+      const legsKm = r.stops.reduce((sum: number, s: any) => sum + s.legDistanceKm, 0) + back.distanceKm;
+      expect(r.totalDistanceKm).toBeCloseTo(legsKm, 0);
     });
   });
 

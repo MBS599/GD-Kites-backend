@@ -21,20 +21,33 @@ export class RoutingService {
     this.planner = new OsrmPlanner(config.get('OSRM_URL'));
   }
 
-  async planTrip(origin: LatLng, stops: LatLng[]): Promise<PlannedTrip> {
+  /** See {@link RoutePlanner.planTrip}; with no stops there is no trip (and no drive back). */
+  async planTrip(origin: LatLng, stops: LatLng[], end?: LatLng): Promise<PlannedTrip> {
     if (stops.length === 0) {
-      return { order: [], legs: [], totalDistanceKm: 0, totalDurationMin: 0, geometry: [origin], optimized: true, provider: this.planner.name };
+      return {
+        order: [],
+        legs: [],
+        returnLeg: null,
+        totalDistanceKm: 0,
+        totalDurationMin: 0,
+        geometry: [origin],
+        optimized: true,
+        provider: this.planner.name,
+      };
     }
-    const key = [origin, ...stops].map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join('|');
+    const key = [origin, ...stops, ...(end ? [end] : [])]
+      .map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`)
+      .join('|')
+      .concat(end ? '|end' : '');
     const hit = this.cache.get(key);
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.trip;
 
     let trip: PlannedTrip;
     try {
-      trip = await this.planner.planTrip(origin, stops);
+      trip = await this.planner.planTrip(origin, stops, end);
     } catch (e) {
       this.logger.warn(`route planning via ${this.planner.name} failed, using fallback: ${String(e)}`);
-      return nearestNeighbourTrip(origin, stops); // not cached: retry the provider next time
+      return nearestNeighbourTrip(origin, stops, end); // not cached: retry the provider next time
     }
     if (this.cache.size >= CACHE_MAX) this.cache.delete(this.cache.keys().next().value!);
     this.cache.set(key, { trip, at: Date.now() });

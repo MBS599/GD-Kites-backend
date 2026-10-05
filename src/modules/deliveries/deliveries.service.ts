@@ -161,8 +161,10 @@ export class DeliveriesService {
 
   /**
    * Today's route for a driver: open deliveries in the best order on real
-   * roads, starting from the driver's live position (if fresh) or their hub.
-   * A delivery already in transit stays first; the rest are optimised after it.
+   * roads, starting from the driver's live position (if fresh) or their hub,
+   * and ending back at the hub. The stop order is chosen with the drive back
+   * included. A delivery already in transit stays first; the rest are
+   * optimised after it.
    */
   async route(driverId: string) {
     const driver = await this.prisma.driverProfile.findUniqueOrThrow({
@@ -177,25 +179,28 @@ export class DeliveriesService {
 
     const fresh = driver.lastLocationAt && Date.now() - driver.lastLocationAt.getTime() < LIVE_LOCATION_MAX_AGE_MS;
     const area = driver.serviceArea ?? orders[0]?.serviceArea ?? null;
+    const hub = {
+      lat: area?.hubLat ?? this.config.hub.lat,
+      lng: area?.hubLng ?? this.config.hub.lng,
+      label: area?.hubName ?? 'Hub',
+    };
     const origin =
       fresh && driver.lastLat != null && driver.lastLng != null
         ? { lat: driver.lastLat, lng: driver.lastLng, source: 'driver' as const, label: 'Your location' }
-        : {
-            lat: area?.hubLat ?? this.config.hub.lat,
-            lng: area?.hubLng ?? this.config.hub.lng,
-            source: 'hub' as const,
-            label: area?.hubName ?? 'Hub',
-          };
+        : { lat: hub.lat, lng: hub.lng, source: 'hub' as const, label: hub.label };
 
     const pt = (o: FullOrder) => ({ lat: o.addrLat, lng: o.addrLng });
     const inTransit = orders.filter((o) => o.delivery?.status === 'IN_TRANSIT');
     const pending = orders.filter((o) => o.delivery?.status !== 'IN_TRANSIT');
 
-    // Visit in-transit deliveries first (in their own best order), then the rest from the last of those.
-    const first = await this.routing.planTrip(origin, inTransit.map(pt));
+    // Visit in-transit deliveries first (in their own best order), then the rest from the last of those;
+    // whichever part comes last ends back at the hub.
+    const home = { lat: hub.lat, lng: hub.lng };
+    const first = await this.routing.planTrip(origin, inTransit.map(pt), pending.length ? undefined : home);
     const firstOrdered = first.order.map((i) => inTransit[i]);
     const restOrigin = firstOrdered.length ? pt(firstOrdered[firstOrdered.length - 1]) : origin;
-    const rest = await this.routing.planTrip(restOrigin, pending.map(pt));
+    const rest = await this.routing.planTrip(restOrigin, pending.map(pt), home);
+    const back = rest.returnLeg ?? first.returnLeg;
     const ordered = [...firstOrdered, ...rest.order.map((i) => pending[i])];
     const legs = [...first.legs, ...rest.legs];
 
@@ -215,6 +220,16 @@ export class DeliveriesService {
     return {
       origin,
       stops,
+      /** Drive back to the hub after the last delivery (null when nothing is left to deliver). */
+      returnToHub: back
+        ? {
+            name: hub.label,
+            location: { lat: hub.lat, lng: hub.lng },
+            distanceKm: back.distanceKm,
+            durationMin: back.durationMin,
+            arrivalMinutes: elapsed + back.durationMin,
+          }
+        : null,
       totalDistanceKm: Math.round((first.totalDistanceKm + rest.totalDistanceKm) * 10) / 10,
       totalDurationMin: first.totalDurationMin + rest.totalDurationMin,
       totalFare: ordered.reduce((s, o) => s + (o.delivery?.fare.toNumber() ?? 0), 0),
