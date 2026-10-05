@@ -2,7 +2,7 @@
 
 /**
  * A "base + per km" tariff set by admins:
- * - customer delivery charge: per service area (known at checkout);
+ * - customer delivery charge: the delivery vehicle's rates (the Tempo, set in admin settings);
  * - driver fare: per driver — their vehicle type's rates, or a custom rate.
  */
 export interface Tariff {
@@ -10,8 +10,8 @@ export interface Tariff {
   perKm: number;
 }
 
-/** Fallbacks for legacy records (orders without an area, drivers without a vehicle type). */
-export const DEFAULT_DELIVERY_TARIFF: Tariff = { base: 60, perKm: 30 };
+/** Fallbacks: no delivery vehicle set (Tempo rate), drivers without a vehicle type. */
+export const DEFAULT_DELIVERY_TARIFF: Tariff = { base: 150, perKm: 25 };
 export const DEFAULT_DRIVER_TARIFF: Tariff = { base: 40, perKm: 13 };
 
 /** base + perKm × distance, rounded to the nearest rupee. */
@@ -19,7 +19,7 @@ export function applyTariff(t: Tariff, distanceKm: number): number {
   return Math.round(t.base + t.perKm * Math.max(0, distanceKm));
 }
 
-/** Delivery charge billed to the customer (area tariff). */
+/** Delivery charge billed to the customer (delivery vehicle's tariff). */
 export function deliveryChargeFor(distanceKm: number, tariff: Tariff): number {
   return applyTariff(tariff, distanceKm);
 }

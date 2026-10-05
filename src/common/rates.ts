@@ -1,17 +1,16 @@
-import type { DriverProfile, Prisma, ServiceArea, VehicleType } from '@prisma/client';
+import type { DriverProfile, Prisma, VehicleType } from '@prisma/client';
 import { DEFAULT_DELIVERY_TARIFF, DEFAULT_DRIVER_TARIFF, type Tariff } from '../domain/pricing';
 
-type AreaRateFields = Pick<ServiceArea, 'deliveryBaseCharge' | 'deliveryPerKm'>;
 type DriverRateFields = Pick<DriverProfile, 'customBaseFare' | 'customPerKm'> & {
   vehicleType?: Pick<VehicleType, 'baseFare' | 'perKm'> | null;
 };
 
 const n = (d: Prisma.Decimal) => d.toNumber();
 
-/** Customer delivery tariff of a service area. */
-export function deliveryTariffOf(area: AreaRateFields | null | undefined): Tariff {
-  if (!area) return DEFAULT_DELIVERY_TARIFF;
-  return { base: n(area.deliveryBaseCharge), perKm: n(area.deliveryPerKm) };
+/** Customer delivery tariff: the delivery vehicle's rates (the Tempo), set in admin settings. */
+export function deliveryTariffOf(vehicle: Pick<VehicleType, 'baseFare' | 'perKm'> | null | undefined): Tariff {
+  if (!vehicle) return DEFAULT_DELIVERY_TARIFF;
+  return { base: n(vehicle.baseFare), perKm: n(vehicle.perKm) };
 }
 
 export type DriverTariffSource = 'custom' | 'vehicle' | 'default';

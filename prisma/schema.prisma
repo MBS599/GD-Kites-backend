@@ -125,6 +125,9 @@ model AppSettings {
   /// Business number linked to WhatsApp (QR scan), e.g. 919822011122. Shown to users as the shop's
   /// contact number; null while no phone is linked, and then no contact number is shown anywhere.
   whatsappNumber     String?
+  /// Customer delivery charge = this vehicle type's baseFare + perKm × km from hub (the Tempo).
+  deliveryVehicleTypeId String?
+  deliveryVehicleType   VehicleType? @relation("DeliveryChargeVehicle", fields: [deliveryVehicleTypeId], references: [id], onDelete: SetNull)
   updatedAt          DateTime @updatedAt
 }
 
@@ -140,6 +143,8 @@ model VehicleType {
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
   drivers   DriverProfile[]
+  /// Set when this type's rate is also the customer delivery charge.
+  deliveryChargeFor AppSettings[] @relation("DeliveryChargeVehicle")
 }
 
 /// Admin-managed delivery geofence (circle) with its own dispatch hub.
@@ -155,9 +160,6 @@ model ServiceArea {
   hubName            String
   hubLat             Float
   hubLng             Float
-  /// Customer delivery charge = deliveryBaseCharge + deliveryPerKm × km from hub.
-  deliveryBaseCharge Decimal         @default(60) @db.Decimal(10, 2)
-  deliveryPerKm      Decimal         @default(30) @db.Decimal(10, 2)
   isActive           Boolean         @default(true)
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt

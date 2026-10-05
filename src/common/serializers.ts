@@ -126,10 +126,6 @@ export function serviceAreaOut(a: ServiceArea) {
     radiusKm: a.radiusKm,
     hub: { name: a.hubName, lat: a.hubLat, lng: a.hubLng },
     isActive: a.isActive,
-    rates: {
-      deliveryBaseCharge: m(a.deliveryBaseCharge),
-      deliveryPerKm: m(a.deliveryPerKm),
-    },
   };
 }
 

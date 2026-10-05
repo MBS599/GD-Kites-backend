@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, PartialType } from '@nestjs/swagger';
 import { Prisma } from '@prisma/client';
 import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
@@ -11,7 +11,7 @@ const MONEY = { maxDecimalPlaces: 2 };
 export class CreateVehicleTypeDto {
   /** e.g. "Bike", "Auto rickshaw", "Tempo". Unique. */
   @IsString() @MinLength(2) @MaxLength(40) name: string;
-  /** Driver fare = baseFare + perKm × road km from hub (₹). */
+  /** Driver fare = baseFare + perKm × road km from hub (₹). The delivery vehicle's (Tempo) rate is also the customer delivery charge. */
   @IsNumber(MONEY) @Min(0) @Max(100000) baseFare: number;
   @IsNumber(MONEY) @Min(0) @Max(10000) perKm: number;
   @IsOptional() @IsInt() @Min(0) sortOrder?: number;
@@ -50,11 +50,17 @@ export class VehicleTypesController {
     return { vehicleType: vehicleTypeOut(v) };
   }
 
-  /** New rates apply to future assignments; fares already on deliveries don't change. */
+  /** New rates apply to future orders and assignments; placed orders and deliveries keep theirs. */
   @Patch(':id')
   async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateVehicleTypeDto) {
     const exists = await this.prisma.vehicleType.findUnique({ where: { id } });
     if (!exists) throw new NotFoundException('Vehicle type not found.');
+    if (dto.isActive === false) {
+      const s = await this.prisma.appSettings.findUnique({ where: { id: 1 } });
+      if (s?.deliveryVehicleTypeId === id) {
+        throw new BadRequestException('This vehicle sets the customer delivery charge. Choose another one in Settings first.');
+      }
+    }
     const v = await this.prisma.vehicleType.update({
       where: { id },
       data: {

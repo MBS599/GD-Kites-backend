@@ -6,7 +6,7 @@ import { lineTotal, unitPrice } from '../../common/pricing';
 import { comboContents, comboCost, isAvailable, orderInclude, orderOut, productDisplayName, productInclude, type FullOrder, upperSnake } from '../../common/serializers';
 import { deliveryChargeFor, driverFareFor, etaMinutes } from '../../domain/pricing';
 import { PrismaService } from '../../prisma/prisma.service';
-import { deliveryTariffOf, driverTariffOf } from '../../common/rates';
+import { driverTariffOf } from '../../common/rates';
 import { RealtimeService } from '../realtime/realtime.service';
 import { SmsService } from '../sms/sms.service';
 import { OtpGenerator } from '../sms/otp';
@@ -17,6 +17,7 @@ const DELIVERY_OTP_MAX_SENDS = 4;
 import { ServiceAreasService } from '../service-areas/service-areas.service';
 import { assertTransition, moveOrder, refreshDriverAvailability } from './order-workflow';
 import { PaymentsService, type CheckoutSession } from '../payments/payments.service';
+import { SettingsService } from '../settings/settings.controller';
 
 @Injectable()
 export class OrdersService {
@@ -27,6 +28,7 @@ export class OrdersService {
     private readonly sms: SmsService,
     private readonly otp: OtpGenerator,
     private readonly payments: PaymentsService,
+    private readonly settings: SettingsService,
   ) {}
 
   private load(id: string) {
@@ -223,7 +225,8 @@ export class OrdersService {
         });
       }
 
-      const deliveryCharge = new Prisma.Decimal(deliveryChargeFor(coverage.distanceKm, deliveryTariffOf(coverage.area)));
+      // Customer delivery charge: the delivery vehicle's (Tempo) rate × km, set in admin settings.
+      const deliveryCharge = new Prisma.Decimal(deliveryChargeFor(coverage.distanceKm, await this.settings.deliveryTariff()));
       // With online payments on, the delivery charge is paid first; the order reaches the admin once paid.
       awaiting = this.payments.requiresPayment(deliveryCharge);
       const status: OrderStatus = awaiting ? 'AWAITING_PAYMENT' : 'PENDING';

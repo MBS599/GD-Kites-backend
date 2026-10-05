@@ -56,8 +56,6 @@ async function main() {
     data: {
       name: 'Ahilyanagar', city: 'Ahilyanagar', centerLat: 19.0948, centerLng: 74.748, radiusKm: 15,
       hubName: 'Ahilyanagar hub', hubLat: 19.0948, hubLng: 74.748, isActive: false,
-      // Each area has its own customer delivery charge; Pune uses the defaults (₹60 + ₹30/km).
-      deliveryBaseCharge: D(50), deliveryPerKm: D(25),
     },
   });
   await prisma.appSettings.upsert({
@@ -179,6 +177,8 @@ async function main() {
   const bike = await prisma.vehicleType.create({ data: { name: 'Bike', baseFare: D(40), perKm: D(13), sortOrder: 0 } });
   const auto = await prisma.vehicleType.create({ data: { name: 'Auto rickshaw', baseFare: D(70), perKm: D(18), sortOrder: 1 } });
   const tempo = await prisma.vehicleType.create({ data: { name: 'Tempo', baseFare: D(150), perKm: D(25), sortOrder: 2 } });
+  // Customer delivery charge = the Tempo rate (most deliveries go by tempo).
+  await prisma.appSettings.update({ where: { id: 1 }, data: { deliveryVehicleTypeId: tempo.id } });
 
   const mkDriver = (email: string, name: string, phone: string, type: 'GD' | 'EXTERNAL', vehicle: string,
     vehicleType: typeof bike, availability: 'AVAILABLE' | 'ON_DELIVERY' = 'AVAILABLE',
@@ -244,7 +244,7 @@ async function main() {
   const mkOrder = async (number: number, customer: typeof mayur, address: typeof mayurShop,
     lines: { product: P; qty: number }[], status: OrderStatus, placedAt: Date, driver?: typeof rahul) => {
     const subtotal = lines.reduce((s, l) => s.add(lineTotal(l.product, l.qty)), D(0));
-    const deliveryCharge = D(deliveryChargeFor(address.distanceKm, deliveryTariffOf(pune)));
+    const deliveryCharge = D(deliveryChargeFor(address.distanceKm, deliveryTariffOf(tempo)));
     const step = (i: number) => new Date(placedAt.getTime() + i * 25 * 60_000);
     const steps = timeline[status];
     const deliveredAt = status === 'DELIVERED' ? step(steps.length - 1) : null;

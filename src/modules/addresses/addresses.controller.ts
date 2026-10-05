@@ -103,10 +103,11 @@ export class AddressesController {
         payOnline: 0,
       };
     }
-    const deliveryCharge = deliveryChargeFor(hit.distanceKm, deliveryTariffOf(hit.area));
+    const settings = await this.settings.get();
+    const deliveryCharge = deliveryChargeFor(hit.distanceKm, deliveryTariffOf(settings.deliveryVehicleType));
     // Online payments: delivery charge + GST + gateway fee paid now; the items in cash on delivery.
     const online = this.config.get('PAYMENTS_PROVIDER') === 'razorpay' && deliveryCharge > 0;
-    const s = online ? await this.settings.get() : null;
+    const s = online ? settings : null;
     const charges = s ? onlineChargesFor(deliveryCharge, s.deliveryGstPercent, s.gatewayFeePercent) : null;
     return {
       serviceable: true,

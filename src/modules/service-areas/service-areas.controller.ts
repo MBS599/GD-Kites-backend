@@ -1,6 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, PartialType } from '@nestjs/swagger';
-import { Prisma } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
@@ -20,7 +19,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RADIUS_CEILING_KM, SettingsService } from '../settings/settings.controller';
 import { ServiceAreasService } from './service-areas.service';
 
-const MONEY = { maxDecimalPlaces: 2 };
 
 export class CreateServiceAreaDto {
   /** Display name, e.g. "Pune" or "Ahilyanagar". Unique. */
@@ -35,10 +33,6 @@ export class CreateServiceAreaDto {
   @IsOptional() @IsLatitude() hubLat?: number;
   @IsOptional() @IsLongitude() hubLng?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
-
-  /** Customer delivery charge = base + perKm × km from hub (₹). */
-  @IsOptional() @IsNumber(MONEY) @Min(0) @Max(100000) deliveryBaseCharge?: number;
-  @IsOptional() @IsNumber(MONEY) @Min(0) @Max(10000) deliveryPerKm?: number;
 }
 
 export class UpdateServiceAreaDto extends PartialType(CreateServiceAreaDto) {}
@@ -48,7 +42,6 @@ export class AreaListQuery {
   @IsOptional() @Transform(({ value }) => value === 'true' || value === true) @IsBoolean() all?: boolean;
 }
 
-const dec = (v: number | undefined) => (v === undefined ? undefined : new Prisma.Decimal(v));
 
 @ApiTags('Service areas')
 @ApiBearerAuth()
@@ -112,17 +105,14 @@ export class ServiceAreasController {
         hubLat: dto.hubLat ?? dto.centerLat,
         hubLng: dto.hubLng ?? dto.centerLng,
         isActive: dto.isActive ?? true,
-        // Omitted rates fall back to the column defaults.
-        deliveryBaseCharge: dec(dto.deliveryBaseCharge),
-        deliveryPerKm: dec(dto.deliveryPerKm),
       },
     });
     return { serviceArea: serviceAreaOut(a) };
   }
 
   /**
-   * Edit rates/geofence or switch an area on/off. Rate changes apply to new
-   * orders and assignments only; placed orders keep their charges and fares.
+   * Edit the geofence/hub or switch an area on/off. Placed orders keep their
+   * charges and fares.
    */
   @Roles('ADMIN')
   @Patch(':id')
@@ -142,8 +132,6 @@ export class ServiceAreasController {
         hubLat: dto.hubLat,
         hubLng: dto.hubLng,
         isActive: dto.isActive,
-        deliveryBaseCharge: dec(dto.deliveryBaseCharge),
-        deliveryPerKm: dec(dto.deliveryPerKm),
       },
     });
     return { serviceArea: serviceAreaOut(a) };

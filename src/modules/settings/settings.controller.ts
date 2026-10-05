@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Injectable, Patch } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Injectable, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
+import { IsInt, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { Roles } from '../../common/auth.decorators';
-import type { AppSettings } from '@prisma/client';
+import type { AppSettings, VehicleType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { deliveryTariffOf } from '../../common/rates';
+import { vehicleTypeOut } from '../../common/serializers';
+import type { Tariff } from '../../domain/pricing';
 
 /** Hard ceiling (also enforced by a DB CHECK constraint). */
 export const RADIUS_CEILING_KM = 1000;
@@ -14,7 +17,17 @@ export class SettingsService {
 
   /** The single settings row (created with defaults if missing). */
   get() {
-    return this.prisma.appSettings.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
+    return this.prisma.appSettings.upsert({
+      where: { id: 1 },
+      create: { id: 1 },
+      update: {},
+      include: { deliveryVehicleType: true },
+    });
+  }
+
+  /** Customer delivery charge rate: the delivery vehicle's (Tempo) base + per km. */
+  async deliveryTariff(): Promise<Tariff> {
+    return deliveryTariffOf((await this.get()).deliveryVehicleType);
   }
 
   /** Smallest cart subtotal a customer can order, in rupees (0 = none). */
@@ -43,15 +56,19 @@ export class UpdateSettingsDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(5) gatewayFeePercent?: number;
   /** Smallest cart value (goods, before delivery) in rupees. 0 = no minimum. Default 1000. */
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(10_000_000) minOrderValue?: number;
+  /** Vehicle type whose rate sets the customer delivery charge (the Tempo). */
+  @IsOptional() @IsUUID() deliveryVehicleTypeId?: string;
 }
 
-const out = (s: AppSettings) => ({
+const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
   maxServiceRadiusKm: s.maxServiceRadiusKm,
   dispatchRadiusKm: s.dispatchRadiusKm,
   dispatchMaxOrders: s.dispatchMaxOrders,
   deliveryGstPercent: s.deliveryGstPercent,
   gatewayFeePercent: s.gatewayFeePercent,
   minOrderValue: s.minOrderValue.toNumber(),
+  /** Customer delivery charge = this vehicle's baseFare + perKm × km (null = default ₹150 + ₹25/km). */
+  deliveryVehicleType: s.deliveryVehicleType ? vehicleTypeOut(s.deliveryVehicleType) : null,
 });
 
 @ApiTags('Settings')
@@ -72,10 +89,15 @@ export class SettingsController {
   /** Lowering the max does not shrink existing areas; it only limits future edits. */
   @Patch()
   async update(@Body() dto: UpdateSettingsDto) {
+    if (dto.deliveryVehicleTypeId) {
+      const v = await this.prisma.vehicleType.findUnique({ where: { id: dto.deliveryVehicleTypeId } });
+      if (!v || !v.isActive) throw new BadRequestException('Choose an active vehicle type for the delivery charge.');
+    }
     const s = await this.prisma.appSettings.upsert({
       where: { id: 1 },
       create: { id: 1, ...dto },
       update: { ...dto },
+      include: { deliveryVehicleType: true },
     });
     return { settings: out(s) };
   }

@@ -932,20 +932,26 @@ describe('GD Kite Center API (e2e)', () => {
       await http.patch(`${API}/settings`).set(auth(admin)).send({ dispatchRadiusKm: 4 }).expect(200);
     });
 
-    it('delivery charge = area rates; driver fare = the assigned driver’s vehicle/custom rates', async () => {
+    it('delivery charge = the Tempo rate (settings); driver fare = the assigned driver’s vehicle/custom rates', async () => {
+      // The delivery vehicle (Tempo, ₹150 + ₹25/km) sets the customer delivery charge.
+      const settings = (await http.get(`${API}/settings`).set(auth(admin)).expect(200)).body.settings;
+      expect(settings.deliveryVehicleType).toMatchObject({ name: 'Tempo', baseFare: 150, perKm: 25 });
+      const tempoId = settings.deliveryVehicleType.id;
+      let q = (await http.get(`${API}/addresses/quote?lat=18.4529&lng=73.8652`).set(auth(customer)).expect(200)).body;
+      expect(q.deliveryCharge).toBe(Math.round(150 + 25 * q.distanceKm));
+
+      // Editing the Tempo rate changes the charge; areas have no delivery rates any more.
+      await http.patch(`${API}/vehicle-types/${tempoId}`).set(auth(admin)).send({ baseFare: 100, perKm: 10 }).expect(200);
+      q = (await http.get(`${API}/addresses/quote?lat=18.4529&lng=73.8652`).set(auth(customer)).expect(200)).body;
+      expect(q.deliveryCharge).toBe(Math.round(100 + 10 * q.distanceKm));
       const all = (await http.get(`${API}/service-areas?all=true`).set(auth(admin))).body.serviceAreas;
       const pune = all.find((a: any) => a.name === 'Pune');
-      expect(pune.rates).toEqual({ deliveryBaseCharge: 60, deliveryPerKm: 30 });
-      await http
-        .patch(`${API}/service-areas/${pune.id}`)
-        .set(auth(admin))
-        .send({ deliveryBaseCharge: 100, deliveryPerKm: 10 })
-        .expect(200);
-      // Area-level driver rates no longer exist.
+      expect(pune.rates).toBeUndefined();
+      await http.patch(`${API}/service-areas/${pune.id}`).set(auth(admin)).send({ deliveryBaseCharge: 100 }).expect(400);
       await http.patch(`${API}/service-areas/${pune.id}`).set(auth(admin)).send({ driverBaseFare: 50 }).expect(400);
-
-      const q = (await http.get(`${API}/addresses/quote?lat=18.4529&lng=73.8652`).set(auth(customer)).expect(200)).body;
-      expect(q.deliveryCharge).toBe(Math.round(100 + 10 * q.distanceKm));
+      // The delivery vehicle can't be switched off while it sets the charge.
+      await http.patch(`${API}/vehicle-types/${tempoId}`).set(auth(admin)).send({ isActive: false }).expect(400);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ deliveryVehicleTypeId: 'not-a-uuid' }).expect(400);
 
       const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
       const shop = addresses.find((a: any) => a.serviceArea?.name === 'Pune');
@@ -957,18 +963,18 @@ describe('GD Kite Center API (e2e)', () => {
       const assigned = (
         await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: otherDriver.user.driverId }).expect(200)
       ).body.order;
-      // Suresh drives a Tempo: ₹150 + ₹25/km.
+      // Suresh drives the Tempo: his pay equals the delivery charge.
       expect(assigned.driver.vehicleType.name).toBe('Tempo');
-      expect(assigned.driverFare).toBe(Math.round(150 + 25 * order.address.distanceKm));
+      expect(assigned.driverFare).toBe(order.deliveryCharge);
 
-      // Re-assign to Rahul (Bike ₹40 + ₹13/km): the fare follows the driver.
+      // Re-assign to Rahul (Bike ₹40 + ₹13/km): the fare follows the driver's vehicle.
       const bikeFare = (
         await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: driver.user.driverId }).expect(200)
       ).body.order.driverFare;
       expect(bikeFare).toBe(Math.round(40 + 13 * order.address.distanceKm));
 
       // Changing rates later never rewrites placed orders.
-      await http.patch(`${API}/service-areas/${pune.id}`).set(auth(admin)).send({ deliveryBaseCharge: 60, deliveryPerKm: 30 }).expect(200);
+      await http.patch(`${API}/vehicle-types/${tempoId}`).set(auth(admin)).send({ baseFare: 150, perKm: 25 }).expect(200);
       const types = (await http.get(`${API}/vehicle-types`).set(auth(admin)).expect(200)).body.vehicleTypes;
       const bikeType = types.find((t: any) => t.name === 'Bike');
       await http.patch(`${API}/vehicle-types/${bikeType.id}`).set(auth(admin)).send({ perKm: 99 }).expect(200);
@@ -977,8 +983,6 @@ describe('GD Kite Center API (e2e)', () => {
       expect(again.driverFare).toBe(bikeFare);
       await http.patch(`${API}/vehicle-types/${bikeType.id}`).set(auth(admin)).send({ perKm: 13 }).expect(200);
       await http.post(`${API}/orders/${order.id}/reject`).set(auth(admin)).send({ reason: 'Test cleanup' }).expect(200);
-
-      await http.patch(`${API}/service-areas/${pune.id}`).set(auth(admin)).send({ deliveryPerKm: -1 }).expect(400);
     });
 
     it('switching an area off blocks new checkouts there but keeps the address', async () => {

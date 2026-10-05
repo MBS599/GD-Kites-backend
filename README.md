@@ -58,7 +58,7 @@ Admins control where the business delivers — e.g. launch in **Pune**, later sw
 
 ### Charges & fares (admin-set)
 
-- Customer delivery charge (per service area) = `deliveryBaseCharge + deliveryPerKm × km` (defaults ₹60 + ₹30/km).
+- Customer delivery charge = the delivery vehicle's rate (`baseFare + perKm × km`), chosen in admin Settings — the Tempo (₹150 + ₹25/km by default).
 - Driver fare (per driver) = `baseFare + perKm × km` of the driver's **vehicle type** (`/vehicle-types`, admin CRUD; seeded Bike ₹40 + ₹13/km, Auto rickshaw ₹70 + ₹18/km, Tempo ₹150 + ₹25/km). A driver can have a custom fare (`PATCH /drivers/:id` with `customBaseFare` + `customPerKm`, both or neither; `null` for both clears it) which overrides the vehicle rate. Driver responses include `fare { baseFare, perKm, source: custom|vehicle|default }`.
 - Re-assigning an order to another driver recalculates the fare with the new driver's rate.
 - `km` is road distance from the area's hub; result rounded to the nearest rupee. Rates accept up to 2 decimals.
