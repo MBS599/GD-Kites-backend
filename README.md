@@ -209,6 +209,12 @@ ssh ubuntu@<server> 'sudo bash /tmp/deploy-api.sh /tmp/gdkites-api.tar.gz'
 
 **New server:** `sudo bash deploy/server-setup.sh` on a fresh Ubuntu 24.04, then deploy as above and `sudo certbot --nginx -d gdkites.in -d www.gdkites.in -d api.gdkites.in`.
 
+**CI/CD (GitHub Actions).** Both repos run `.github/workflows/ci-cd.yml`:
+- every push / pull request: build + tests (API: unit and end-to-end on a throwaway Postgres; app: `flutter analyze` + tests);
+- a push to `production-ready` that passes, when the repo variable `AUTO_DEPLOY` is `true`: the API is packaged and installed with `deploy/deploy-api.sh` (migrations included) and health-checked; the app repo publishes the web app, the website and (if the Android signing secrets are set) the signed APK.
+- Secrets per repo: `SSH_HOST`, `SSH_USER` (ubuntu), `SSH_PRIVATE_KEY` (a deploy key in `~ubuntu/.ssh/authorized_keys`), `SSH_KNOWN_HOSTS` (`ssh-keyscan -H <host>`); app repo optionally `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`.
+- nginx config changes (`deploy/nginx-gdkites.conf`) are still applied by hand: certbot edits the live file.
+
 ## Production checklist
 
 `NODE_ENV=production`, strong distinct JWT secrets, real `GOOGLE_CLIENT_ID`s, restricted `CORS_ORIGINS`, HTTPS in front, `npx prisma migrate deploy` on release, uploads moved to object storage (S3/GCS) for multi-instance deployments.

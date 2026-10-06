@@ -1,0 +1,94 @@
+# CI: every push and pull request — build, unit tests, end-to-end tests on a throwaway Postgres.
+# CD: a push to production-ready (after CI passes) deploys the API to the Lightsail server.
+#
+# Turn deploys on with the repository variable AUTO_DEPLOY = true (Settings → Secrets and
+# variables → Actions → Variables) once the secrets below are added.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   SSH_HOST         server static IP or hostname
+#   SSH_USER         login user (ubuntu)
+#   SSH_PRIVATE_KEY  private key of a deploy key in that user's ~/.ssh/authorized_keys
+#   SSH_KNOWN_HOSTS  output of `ssh-keyscan -H <host>` (pins the server's host key)
+name: API CI/CD
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: gdkite
+          POSTGRES_PASSWORD: gdkite
+          POSTGRES_DB: gdkite
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U gdkite" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # test/env.ts swaps the database name for gdkite_test and forces safe test providers.
+      DATABASE_URL: postgresql://gdkite:gdkite@localhost:5432/gdkite?schema=public
+      JWT_ACCESS_SECRET: ci-access-secret-0123456789abcdef0123456789
+      JWT_REFRESH_SECRET: ci-refresh-secret-0123456789abcdef012345678
+      # The WhatsApp browser is never started in tests.
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run build
+      - name: Test database
+        run: PGPASSWORD=gdkite psql -h localhost -U gdkite -d gdkite -c 'CREATE DATABASE gdkite_test'
+      - name: Unit tests
+        run: npx jest
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+  deploy:
+    needs: test
+    # Deploys once the repo variable AUTO_DEPLOY is 'true' (set after adding the secrets).
+    if: vars.AUTO_DEPLOY == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/production-ready'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    concurrency:
+      group: deploy-api-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: Package release
+        run: git archive --format=tar.gz -o gdkites-api.tar.gz HEAD
+      - name: Upload and install
+        env:
+          TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
+        run: |
+          scp -i ~/.ssh/id_deploy gdkites-api.tar.gz deploy/deploy-api.sh "$TARGET:/tmp/"
+          # Builds on the server and runs `prisma migrate deploy` (see deploy/deploy-api.sh).
+          ssh -i ~/.ssh/id_deploy "$TARGET" 'sudo bash /tmp/deploy-api.sh /tmp/gdkites-api.tar.gz && rm -f /tmp/gdkites-api.tar.gz'
+      - name: Health check
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS https://api.gdkites.in/api/v1/health; then echo; exit 0; fi
+            sleep 5
+          done
+          echo "API did not become healthy" >&2
+          exit 1
