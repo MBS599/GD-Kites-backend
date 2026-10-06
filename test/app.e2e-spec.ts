@@ -1317,6 +1317,45 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('product page: gallery, highlights and specifications', () => {
+    it('admin saves a photo/video gallery; the first photo is the cover', async () => {
+      const img = 'https://api.gdkites.in/uploads/a.jpg';
+      const vid = 'https://api.gdkites.in/uploads/b.mp4';
+      const created = (
+        await http
+          .post(`${API}/products`)
+          .set(auth(admin))
+          .send({
+            name: 'Gallery Kite',
+            category: 'designerKites',
+            price: 30,
+            media: [{ type: 'video', url: vid }, { type: 'image', url: img }],
+            highlights: ['  Hand-made in Bareilly ', ''],
+            specs: [{ label: 'Paper', value: 'Tissue' }],
+            description: 'Long text. '.repeat(300),
+          })
+          .expect(201)
+      ).body.product;
+      expect(created.media).toEqual([{ type: 'video', url: vid }, { type: 'image', url: img }]);
+      expect(created.imageUrl).toBe(img);
+      expect(created.highlights).toEqual(['Hand-made in Bareilly']);
+      expect(created.specs).toEqual([{ label: 'Paper', value: 'Tissue' }]);
+
+      // Customers see the same; an older client sending only imageUrl gets a one-photo gallery.
+      const seen = (await http.get(`${API}/products/${created.id}`).set(auth(customer)).expect(200)).body.product;
+      expect(seen.media).toHaveLength(2);
+      const old = (await http.post(`${API}/products`).set(auth(admin)).send({ name: 'Old Kite', category: 'fighterKites', price: 9, imageUrl: img }).expect(201)).body.product;
+      expect(old.media).toEqual([{ type: 'image', url: img }]);
+
+      const bad = (body: object) => http.patch(`${API}/products/${created.id}`).set(auth(admin)).send(body).expect(400);
+      await bad({ media: [{ type: 'audio', url: img }] });
+      await bad({ specs: [{ label: '', value: 'x' }] });
+      await bad({ highlights: Array(11).fill('x') });
+
+      for (const id of [created.id, old.id]) await http.delete(`${API}/products/${id}`).set(auth(admin)).expect(204);
+    });
+  });
+
   describe('admin who also delivers', () => {
     it('gets a driver profile (pay ₹0), takes an order through the delivery screens, then stops', async () => {
       const tempo = (await http.get(`${API}/vehicle-types`).set(auth(admin))).body.vehicleTypes.find((t: any) => t.name === 'Tempo');

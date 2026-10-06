@@ -225,6 +225,12 @@ model Product {
   /// Combos this product is part of.
   inCombos    ComboItem[] @relation("ComboComponent")
   description String      @default("")
+  /// Short selling points shown as bullets on the product page.
+  highlights  String[]    @default([])
+  /// Specifications table: [{ label, value }], e.g. { label: "Paper", value: "Tissue" }.
+  specs       Json        @default("[]")
+  /// Photo/video gallery in display order: [{ type: "image" | "video", url }]. The first photo is the cover ([imageUrl]).
+  media       Json        @default("[]")
   material    String?
   /// From the size master; shown in the product name for customers, e.g. "Fighter Kite (Medium)".
   sizeId      String?

@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { productInclude, productOut } from '../../common/serializers';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
-import type { ComboItemDto, CreateProductDto, ProductQuery, UpdateProductDto } from './products.dto';
+import type { ComboItemDto, CreateProductDto, ProductMediaDto, ProductQuery, ProductSpecDto, UpdateProductDto } from './products.dto';
 
 @Injectable()
 export class ProductsService {
@@ -101,10 +101,13 @@ export class ProductsService {
         isDamaged: dto.isDamaged ?? false,
         damageNote: dto.isDamaged ? dto.damageNote?.trim() || null : null,
         description: dto.description?.trim() ?? '',
+        highlights: cleanHighlights(dto.highlights) ?? [],
+        specs: cleanSpecs(dto.specs) ?? [],
+        media: cleanMedia(dto.media) ?? (dto.imageUrl ? [{ type: 'image', url: dto.imageUrl }] : []),
         material: dto.material?.trim() || null,
         slabQty: dto.slabQty ?? null,
         slabPrice: dto.slabPrice == null ? null : new Prisma.Decimal(dto.slabPrice),
-        imageUrl: dto.imageUrl ?? null,
+        imageUrl: dto.media ? coverOf(dto.media) : (dto.imageUrl ?? null),
       },
       include: productInclude,
     });
@@ -146,10 +149,14 @@ export class ProductsService {
         isDamaged: dto.isDamaged,
         damageNote: !isDamaged ? null : dto.damageNote === undefined ? undefined : dto.damageNote?.trim() || null,
         description: dto.description?.trim(),
+        highlights: cleanHighlights(dto.highlights),
+        specs: cleanSpecs(dto.specs),
+        media: cleanMedia(dto.media),
         material: dto.material === undefined ? undefined : dto.material?.trim() || null,
         slabQty,
         slabPrice: slabPrice == null ? null : new Prisma.Decimal(slabPrice),
-        imageUrl: dto.imageUrl,
+        // A new gallery sets the cover; an old client sending only imageUrl still works.
+        imageUrl: dto.media ? coverOf(dto.media) : dto.imageUrl,
       },
       include: productInclude,
     });
@@ -164,4 +171,23 @@ export class ProductsService {
     await this.prisma.cartItem.deleteMany({ where: { productId: id } });
     this.realtime.catalogUpdated(id);
   }
+}
+
+/** The cover photo: the first image of the gallery. */
+function coverOf(media: ProductMediaDto[]): string | null {
+  return media.find((m) => m.type === 'image')?.url ?? null;
+}
+
+function cleanHighlights(list?: string[]): string[] | undefined {
+  return list?.map((h) => h.trim()).filter((h) => h.length > 0);
+}
+
+function cleanSpecs(list?: ProductSpecDto[]): { label: string; value: string }[] | undefined {
+  return list
+    ?.map((s) => ({ label: s.label.trim(), value: s.value.trim() }))
+    .filter((s) => s.label.length > 0 && s.value.length > 0);
+}
+
+function cleanMedia(list?: ProductMediaDto[]): { type: 'image' | 'video'; url: string }[] | undefined {
+  return list?.map((m) => ({ type: m.type, url: m.url }));
 }

@@ -155,6 +155,25 @@ export function categoryOut(c: Category) {
   return { id: c.id, slug: c.slug, name: c.name, sortOrder: c.sortOrder };
 }
 
+type MediaItem = { type: 'image' | 'video'; url: string };
+
+function mediaOf(json: unknown, imageUrl: string | null): MediaItem[] {
+  const list = Array.isArray(json)
+    ? json.filter(
+        (x): x is MediaItem =>
+          !!x && typeof x === 'object' && (x.type === 'image' || x.type === 'video') && typeof x.url === 'string',
+      )
+    : [];
+  return list.length ? list.map(({ type, url }) => ({ type, url })) : imageUrl ? [{ type: 'image', url: imageUrl }] : [];
+}
+
+function specsOf(json: unknown): { label: string; value: string }[] {
+  if (!Array.isArray(json)) return [];
+  return json
+    .filter((x): x is { label: string; value: string } => !!x && typeof x.label === 'string' && typeof x.value === 'string')
+    .map(({ label, value }) => ({ label, value }));
+}
+
 /** [cost]: include the cost price — admins only, never customers. */
 export function productOut(p: ProductWithCategory, { cost = false }: { cost?: boolean } = {}) {
   return {
@@ -183,6 +202,10 @@ export function productOut(p: ProductWithCategory, { cost = false }: { cost?: bo
     /** Combo: what its items cost bought separately (customers see the saving). */
     worth: p.isCombo && p.comboItems?.length ? comboWorth(p.comboItems) : null,
     description: p.description,
+    highlights: p.highlights ?? [],
+    specs: specsOf(p.specs),
+    /** Gallery in display order; products saved before galleries existed show their one photo. */
+    media: mediaOf(p.media, p.imageUrl),
     material: p.material,
     size: p.size ? { id: p.size.id, name: p.size.name } : null,
     slabQty: p.slabQty,
