@@ -212,7 +212,7 @@ ssh ubuntu@<server> 'sudo bash /tmp/deploy-api.sh /tmp/gdkites-api.tar.gz'
 **CI/CD (GitHub Actions).** Both repos run `.github/workflows/ci-cd.yml`:
 - every push / pull request: build + tests (API: unit and end-to-end on a throwaway Postgres; app: `flutter analyze` + tests);
 - a push to `production-ready` that passes, when the repo variable `AUTO_DEPLOY` is `true`: the API is packaged and installed with `deploy/deploy-api.sh` (migrations included) and health-checked; the app repo publishes the web app, the website and (if the Android signing secrets are set) the signed APK.
-- Secrets per repo: `SSH_HOST`, `SSH_USER` (ubuntu), `SSH_PRIVATE_KEY` (a deploy key in `~ubuntu/.ssh/authorized_keys`), `SSH_KNOWN_HOSTS` (`ssh-keyscan -H <host>`); app repo optionally `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`.
+- Secrets per repo: `SSH_HOST`, `SSH_USER` (ubuntu), `SSH_PRIVATE_KEY` (a deploy key in `~ubuntu/.ssh/authorized_keys`) (server host keys are pinned in `.github/known_hosts`); app repo optionally `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`.
 - nginx config changes (`deploy/nginx-gdkites.conf`) are still applied by hand: certbot edits the live file.
 
 ## Production checklist

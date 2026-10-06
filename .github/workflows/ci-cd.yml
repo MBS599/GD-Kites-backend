@@ -8,7 +8,7 @@
 #   SSH_HOST         server static IP or hostname
 #   SSH_USER         login user (ubuntu)
 #   SSH_PRIVATE_KEY  private key of a deploy key in that user's ~/.ssh/authorized_keys
-#   SSH_KNOWN_HOSTS  output of `ssh-keyscan -H <host>` (pins the server's host key)
+# The server's host keys are pinned in .github/known_hosts.
 name: API CI/CD
 
 on:
@@ -70,11 +70,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          TARGET: ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}
         run: |
           install -m 700 -d ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_deploy
+          # Pasted secrets may carry Windows line endings; strip them.
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          # Server host keys are public and pinned in the repo (refresh: ssh-keyscan <host> | grep -v '^#').
+          cp .github/known_hosts ~/.ssh/known_hosts
+          # Fail early with a readable reason (annotations are visible without signing in).
+          ssh-keygen -y -f ~/.ssh/id_deploy > /dev/null 2>&1 ||
+            { echo "::error::SSH_PRIVATE_KEY is not a valid private key (copy the whole file, including the BEGIN/END lines)"; exit 1; }
+          [ "$TARGET" != "@" ] || { echo "::error::SSH_USER / SSH_HOST secrets are missing"; exit 1; }
+          if ! out=$(ssh -i ~/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 "$TARGET" 'sudo -n true && echo ok' 2>&1); then
+            echo "::error::SSH to the server failed: $(echo "$out" | tail -n 3 | tr '\n' ' ')"
+            exit 1
+          fi
       - name: Package release
         run: git archive --format=tar.gz -o gdkites-api.tar.gz HEAD
       - name: Upload and install
