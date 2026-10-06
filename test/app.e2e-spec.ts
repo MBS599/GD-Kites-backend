@@ -419,6 +419,14 @@ describe('GD Kite Center API (e2e)', () => {
         .expect(201);
       expect(up.body.photoUrls).toHaveLength(1);
 
+      // Uploads can be fetched resized (WebP, cached) for lists; unknown widths get the original.
+      const photoPath = new URL(up.body.photoUrls[0]).pathname;
+      const small = await http.get(`${photoPath}?w=200`).expect(200);
+      expect(small.headers['content-type']).toContain('image/webp');
+      expect(small.headers['cache-control']).toContain('immutable');
+      expect((await http.get(`${photoPath}?w=999`).expect(200)).headers['content-type']).toContain('image/png');
+      await http.get('/uploads/not-a-real-file.png?w=200').expect(404);
+
       const me = (await http.get(`${API}/drivers/me`).set(auth(driver)).expect(200)).body;
       expect(me.driver.availability).toBe('onDelivery');
 

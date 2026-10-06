@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
+import { resizedUploads } from './common/resized-uploads';
 import { UPLOAD_DIR } from './common/uploads';
 import { AppConfig } from './config/app-config.service';
 
@@ -21,6 +22,8 @@ export function configureApp(app: NestExpressApplication | INestApplication) {
       transformOptions: { enableImplicitConversion: false },
     }),
   );
+  // ?w=200|400|800|1200 serves a resized WebP (made once, cached); otherwise the original file.
+  app.use('/uploads', resizedUploads(UPLOAD_DIR));
   (app as NestExpressApplication).useStaticAssets(UPLOAD_DIR, { prefix: '/uploads/', maxAge: '7d' });
   (app as NestExpressApplication).disable('x-powered-by');
   // Behind nginx on the same host: take the client IP from X-Forwarded-For (rate limits are per IP).
