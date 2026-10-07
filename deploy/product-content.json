@@ -1,0 +1,110 @@
+[
+  {
+    "name": "Acrylic 6 Reel Charkha", "category": "accessories", "price": 80,
+    "description": "A clear acrylic charkha (firki) for winding and flying manjha. Light in the hand, rigid, and you can see at a glance how much thread is left on it.",
+    "highlights": ["Transparent acrylic body — see the thread at a glance", "Smooth spin for fast winding and letting out", "Doesn't swell or crack like wood in damp weather", "Light and easy to hold"],
+    "specs": [{"label": "Type", "value": "Charkha (firki)"}, {"label": "Material", "value": "Acrylic"}, {"label": "Model", "value": "6 Reel"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Bamboo Charkha", "category": "accessories", "price": 115,
+    "description": "The traditional bamboo charkha kite flyers trust — light, balanced and comfortable to hold through a long session on the terrace.",
+    "highlights": ["Traditional bamboo build, light and well balanced", "Comfortable grip on the side handles", "Good for winding heavy manjha", "A steady seller every kite season"],
+    "specs": [{"label": "Type", "value": "Charkha (firki)"}, {"label": "Material", "value": "Bamboo"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Plastic Charkha", "category": "accessories", "price": 25,
+    "description": "An everyday plastic charkha at a low price — the one most customers pick up with their first bundle of kites. Available in three sizes.",
+    "highlights": ["Light, tough plastic body", "Budget pick for beginners and children", "Three sizes to suit different amounts of thread", "Easy to stock in bulk"],
+    "specs": [{"label": "Type", "value": "Charkha (firki)"}, {"label": "Material", "value": "Plastic"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Plastic Charkha", "category": "accessories", "price": 32,
+    "description": "An everyday plastic charkha at a low price — the one most customers pick up with their first bundle of kites. Available in three sizes.",
+    "highlights": ["Light, tough plastic body", "Budget pick for beginners and children", "Three sizes to suit different amounts of thread", "Easy to stock in bulk"],
+    "specs": [{"label": "Type", "value": "Charkha (firki)"}, {"label": "Material", "value": "Plastic"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Plastic Charkha", "category": "accessories", "price": 37,
+    "description": "An everyday plastic charkha at a low price — the one most customers pick up with their first bundle of kites. Available in three sizes.",
+    "highlights": ["Light, tough plastic body", "Budget pick for beginners and children", "Three sizes to suit different amounts of thread", "Easy to stock in bulk"],
+    "specs": [{"label": "Type", "value": "Charkha (firki)"}, {"label": "Material", "value": "Plastic"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Wooden Charkha", "category": "accessories", "price": 65,
+    "description": "A solid wooden charkha with a firm feel and a smooth turn — a sturdy middle option between plastic and bamboo.",
+    "highlights": ["Solid wood, firm in the hand", "Smooth spin for winding manjha", "Sturdier than plastic for regular flyers"],
+    "specs": [{"label": "Type", "value": "Charkha (firki)"}, {"label": "Material", "value": "Wood"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Assorted Designer Kite", "category": "designerKites", "price": 7.2,
+    "description": "A mix of colourful printed designer kites. Each lot comes in assorted colours and prints, so your counter always looks bright and varied.",
+    "highlights": ["Assorted colours and prints in every lot", "Eye-catching display on your shop counter", "Popular with children and families"],
+    "specs": [{"label": "Type", "value": "Designer kite"}, {"label": "Design", "value": "Assorted"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Fancy Marble", "category": "designerKites", "price": 3.8,
+    "description": "A budget-friendly kite with a fancy marble-style print. Bright, low priced and quick to sell in volume.",
+    "highlights": ["Marble-effect print", "Low price per piece — good for bulk counter sales", "Mixed colours"],
+    "specs": [{"label": "Type", "value": "Designer kite"}, {"label": "Design", "value": "Marble print"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Jhalar 27.5 inch", "category": "designerKites", "price": 5.5,
+    "description": "A 27.5-inch Jhalar kite — colourful, festive and steady in the sky.",
+    "highlights": ["Jhalar style", "27.5-inch size", "Colourful and festive"],
+    "specs": [{"label": "Type", "value": "Designer kite"}, {"label": "Style", "value": "Jhalar"}, {"label": "Size", "value": "27.5 inch"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Jhalar 30.5 inch", "category": "designerKites", "price": 6.5,
+    "description": "The bigger Jhalar kite at 30.5 inches — more presence in the sky and easy to spot.",
+    "highlights": ["Jhalar style", "Larger 30.5-inch size", "Bold and easy to spot when flying"],
+    "specs": [{"label": "Type", "value": "Designer kite"}, {"label": "Style", "value": "Jhalar"}, {"label": "Size", "value": "30.5 inch"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "PVC 24 inch", "category": "designerKites", "price": 1.5,
+    "description": "A compact 24-inch PVC kite at our lowest price. The plastic sheet shrugs off damp weather and light handling — ideal for children and high-volume sales.",
+    "highlights": ["PVC plastic — resists moisture and tearing", "Compact 24-inch size, easy for beginners", "Lowest price per piece in the range"],
+    "specs": [{"label": "Type", "value": "Designer kite"}, {"label": "Material", "value": "PVC"}, {"label": "Size", "value": "24 inch"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Plastic Print 27.5 inch", "category": "designerKites", "price": 3.7,
+    "description": "A printed plastic kite, 27.5 inches across. Bright prints on a durable sheet that holds up better than paper.",
+    "highlights": ["Bright printed designs", "Plastic sheet — more durable than paper", "27.5-inch size"],
+    "specs": [{"label": "Type", "value": "Designer kite"}, {"label": "Material", "value": "Plastic"}, {"label": "Size", "value": "27.5 inch"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Plastic Print Matka 30 inch", "category": "designerKites", "price": 5.5,
+    "description": "A printed plastic kite in the Matka design, 30 inches across — a crowd favourite with a distinctive look.",
+    "highlights": ["Matka design print", "Durable plastic sheet", "30-inch size"],
+    "specs": [{"label": "Type", "value": "Designer kite"}, {"label": "Material", "value": "Plastic"}, {"label": "Design", "value": "Matka"}, {"label": "Size", "value": "30 inch"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Plastic Tawa 42 inch", "category": "designerKites", "price": 13,
+    "description": "A big 42-inch Tawa kite in plastic — the largest in the range, made to stand out high in the sky.",
+    "highlights": ["Large 42-inch size — the biggest in the range", "Durable plastic sheet", "Draws attention on the counter and in the sky"],
+    "specs": [{"label": "Type", "value": "Designer kite"}, {"label": "Material", "value": "Plastic"}, {"label": "Style", "value": "Tawa"}, {"label": "Size", "value": "42 inch"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Printed Plastic Kite", "category": "designerKites", "price": 4,
+    "description": "A colourful printed plastic kite — a dependable, low-cost seller for every season.",
+    "highlights": ["Bright printed designs", "Plastic sheet — handles damp weather better than paper", "Good value for bulk buying"],
+    "specs": [{"label": "Type", "value": "Designer kite"}, {"label": "Material", "value": "Plastic"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Addhi Chil Cut", "category": "fighterKites", "price": 9.2,
+    "description": "An Addhi fighter kite in the Chil cut — quick and responsive, made for patang fights (pench).",
+    "highlights": ["Addhi size", "Chil cut", "Made for patang fights"],
+    "specs": [{"label": "Type", "value": "Fighter kite"}, {"label": "Size", "value": "Addhi"}, {"label": "Cut", "value": "Chil"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Fancy Ghuta Pona", "category": "fighterKites", "price": 11.5,
+    "description": "A fancy Pona fighter kite with the Ghuta design — balanced, fast and good looking.",
+    "highlights": ["Pona size", "Fancy Ghuta design", "Balanced for fighting"],
+    "specs": [{"label": "Type", "value": "Fighter kite"}, {"label": "Size", "value": "Pona"}, {"label": "Design", "value": "Ghuta"}, {"label": "Sold per", "value": "Piece"}]
+  },
+  {
+    "name": "Pona", "category": "fighterKites", "price": 9.2,
+    "description": "The classic Pona fighter kite — a reliable all-rounder that experienced flyers ask for by name.",
+    "highlights": ["Pona size", "Classic fighter build, steady and quick to respond", "Popular with regular flyers"],
+    "specs": [{"label": "Type", "value": "Fighter kite"}, {"label": "Size", "value": "Pona"}, {"label": "Sold per", "value": "Piece"}]
+  }
+]
