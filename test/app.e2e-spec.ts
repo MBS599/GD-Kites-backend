@@ -657,7 +657,7 @@ describe('GD Kite Center API (e2e)', () => {
       const status = (await http.get(`${API}/sms/status`).set(auth(admin)).expect(200)).body;
       expect(status.provider).toBe('log');
       expect(status).toMatchObject({ channel: 'whatsapp', pushEnabled: false });
-      expect(status.events.find((e: any) => e.event === 'orderPlaced')).toMatchObject({ whatsappTemplate: 'gdk_order_placed_v2', text: expect.stringContaining('GD1037') });
+      expect(status.events.find((e: any) => e.event === 'orderPlaced')).toMatchObject({ whatsappTemplate: 'gdk_order_placed_v3', text: expect.stringContaining('GD1037') });
       const test = (await http.post(`${API}/sms/test`).set(auth(admin)).send({ phone: '98220 11122' }).expect(200)).body;
       expect(test).toMatchObject({ status: 'logged', to: '919822011122' });
       const bad = (await http.post(`${API}/sms/test`).set(auth(admin)).send({ phone: '12345' }).expect(200)).body;
@@ -1431,6 +1431,23 @@ describe('GD Kite Center API (e2e)', () => {
       expect((await http.get(`${API}/drivers`).set(auth(admin))).body.drivers.some((d: any) => d.id === me.id)).toBe(false);
       await http.get(`${API}/deliveries`).set(auth(admin)).expect(403);
       expect((await http.get(`${API}/orders/${order.id}`).set(auth(admin))).body.order.status).toBe('delivered');
+    });
+  });
+
+  describe('minimum order quantity', () => {
+    it('charkhas are ordered 6 at least; admins set the minimum per product', async () => {
+      const charkha = (await http.get(`${API}/products?q=Charkha`).set(auth(customer))).body.products[0];
+      expect(charkha.minQty).toBe(6);
+      await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
+      const low = await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: charkha.id, qty: 3 }).expect(400);
+      expect(low.body.error.message).toContain('minimum order');
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: charkha.id, qty: 6 }).expect(201);
+      await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
+      // Admin changes it; null removes it.
+      expect((await http.patch(`${API}/products/${charkha.id}`).set(auth(admin)).send({ minQty: 12 }).expect(200)).body.product.minQty).toBe(12);
+      await http.patch(`${API}/products/${charkha.id}`).set(auth(admin)).send({ minQty: 0 }).expect(400);
+      expect((await http.patch(`${API}/products/${charkha.id}`).set(auth(admin)).send({ minQty: null }).expect(200)).body.product.minQty).toBeNull();
+      await http.patch(`${API}/products/${charkha.id}`).set(auth(admin)).send({ minQty: 6 }).expect(200);
     });
   });
 

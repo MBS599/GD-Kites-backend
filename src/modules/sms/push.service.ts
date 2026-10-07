@@ -16,8 +16,8 @@ export interface PushMessage {
 const PUSH: Partial<Record<SmsEvent, (v: string[]) => Omit<PushMessage, 'data'>>> = {
   orderPlaced: ([, code, , amount]) => ({ title: 'Order placed', body: `${code} · Rs ${amount}. We will confirm it shortly.` }),
   orderConfirmed: ([, code]) => ({ title: 'Order confirmed', body: `${code} is confirmed and being packed.` }),
-  driverAssigned: ([, code, driver]) => ({ title: 'Driver assigned', body: `${driver} will deliver ${code}.` }),
-  outForDelivery: ([, code, driver, , otp]) => ({
+  driverAssigned: ([, code, , driver]) => ({ title: 'Driver assigned', body: `${driver} will deliver ${code}.` }),
+  outForDelivery: ([, code, , driver, , otp]) => ({
     title: 'Out for delivery',
     body: `${code} is on the way with ${driver}. Delivery code: ${otp}`,
   }),

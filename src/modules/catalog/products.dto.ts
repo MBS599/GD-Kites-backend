@@ -102,6 +102,8 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => ComboItemDto)
   comboItems?: ComboItemDto[];
+  /** Smallest quantity a customer can order (e.g. 6 for charkhas); null for none. */
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsInt() @Min(1) @Max(100_000) minQty?: number | null;
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsInt() @Min(1) slabQty?: number | null;
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) slabPrice?: number | null;
 

@@ -8,34 +8,35 @@
  */
 export const SMS_TEMPLATES = {
   // ---- Customer ----
-  /** [customer name, order, items, total, deliver to] */
+  /** [first name, order, items, total, deliver to] */
   orderPlaced: {
     audience: 'customer',
-    text: 'Hello {#var#}, thank you for your GD Kite Center order {#var#}: {#var#}. Total Rs {#var#}, delivering to {#var#}. We will confirm it shortly.',
+    text: 'Hi {#var#}, thank you for your order! We have received order #{#var#} for {#var#} (total Rs {#var#}), to be delivered at {#var#}. We will confirm it shortly.',
     long: [2, 4],
   },
-  /** [customer name, order, items, total] */
+  /** [first name, order, items, total] */
   orderConfirmed: {
     audience: 'customer',
-    text: 'Hello {#var#}, your GD Kite Center order {#var#} ({#var#}, Rs {#var#}) is confirmed and being packed. It will reach you within 3-4 working days.',
+    text: 'Hi {#var#}, your order #{#var#} for {#var#} (Rs {#var#}) is confirmed and is being packed. It will reach you within 3-4 working days.',
     long: [2],
   },
-  /** [customer name, order, driver, driver phone] */
+  /** [first name, order, items, driver, driver phone] */
   driverAssigned: {
     audience: 'customer',
-    text: 'Hello {#var#}, {#var#} ({#var#}) will deliver your GD Kite Center order {#var#}.',
-    order: [0, 2, 3, 1],
+    text: 'Hi {#var#}, your order #{#var#} for {#var#} will be delivered by {#var#} ({#var#}).',
+    long: [2],
   },
-  /** [customer name, order, driver, driver phone, delivery code] */
+  /** [first name, order, items, driver, driver phone, delivery code] */
   outForDelivery: {
     audience: 'customer',
-    text: 'Hello {#var#}, your GD Kite Center order {#var#} is out for delivery with {#var#} ({#var#}). Delivery code {#var#}: share it only after you receive your order.',
-    secretVar: 4,
+    text: 'Hi {#var#}, your order #{#var#} for {#var#} is out for delivery with {#var#} ({#var#}). Delivery code {#var#}: share it only after you receive your order.',
+    secretVar: 5,
+    long: [2],
   },
   /** [delivery code, order] */
   deliveryOtp: {
     audience: 'customer',
-    text: '{#var#} is the delivery code for your GD Kite Center order {#var#}. Share it with the driver only after you receive your order.',
+    text: '{#var#} is the delivery code for your order #{#var#}. Share it with the driver only after you receive your order.',
     secretVar: 0,
   },
   loginOtp: {
@@ -43,16 +44,16 @@ export const SMS_TEMPLATES = {
     text: '{#var#} is your GD Kite Center login OTP. It is valid for 5 minutes. Do not share it with anyone.',
     secretVar: 0,
   },
-  /** [customer name, order, items, total] */
+  /** [first name, order, items, total] */
   orderDelivered: {
     audience: 'customer',
-    text: 'Hello {#var#}, your GD Kite Center order {#var#} ({#var#}, Rs {#var#}) is delivered. Thank you for shopping with us!',
+    text: 'Hi {#var#}, your order #{#var#} for {#var#} has been delivered (Rs {#var#}). Thank you for shopping with GD Kite Center!',
     long: [2],
   },
-  /** [customer name, order, items, reason] */
+  /** [first name, order, items, reason] */
   orderCancelled: {
     audience: 'customer',
-    text: 'Hello {#var#}, your GD Kite Center order {#var#} ({#var#}) was cancelled. Reason: {#var#}.',
+    text: 'Hi {#var#}, we are sorry: your order #{#var#} for {#var#} has been cancelled. Reason: {#var#}.',
     long: [2, 3],
   },
 
@@ -60,25 +61,25 @@ export const SMS_TEMPLATES = {
   /** [first name, how to sign in] */
   driverWelcome: {
     audience: 'driver',
-    text: 'Hello {#var#}, welcome to GD Kite Center deliveries. Install the GD Kites app and sign in with {#var#} to see your deliveries.',
+    text: 'Hi {#var#}, welcome to the GD Kite Center delivery team. Install the GD Kites app and sign in with {#var#} to see your deliveries.',
   },
   /** [driver first name, order, customer, area, items] */
   deliveryAssigned: {
     audience: 'driver',
-    text: 'Hello {#var#}, new delivery {#var#} for {#var#}, {#var#}: {#var#}. Open the GD Kites app to start.',
+    text: 'Hi {#var#}, you have a new delivery: order #{#var#} for {#var#} in {#var#}, with {#var#}. Open the GD Kites app to start.',
     long: [4],
   },
   /** [order] */
   deliveryRemoved: {
     audience: 'driver',
-    text: 'Delivery {#var#} is no longer assigned to you. No action is needed.',
+    text: 'Order #{#var#} is no longer assigned to you. No action is needed.',
   },
 
   // ---- Admin ----
   /** [order, customer, items, total, area] */
   adminNewOrder: {
     audience: 'admin',
-    text: 'New order {#var#} from {#var#}: {#var#}. Total Rs {#var#}, {#var#}. Please confirm it in the GD Kites app.',
+    text: 'New order #{#var#} from {#var#} for {#var#} (total Rs {#var#}), delivering to {#var#}. Please confirm it in the GD Kites app.',
     long: [2],
   },
 

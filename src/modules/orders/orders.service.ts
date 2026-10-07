@@ -198,6 +198,9 @@ export class OrdersService {
         const name = productDisplayName(p);
         if (!p.isActive) throw new BadRequestException(`${name} is no longer available. Remove it from your cart.`);
         if (!isAvailable(p)) throw new ConflictException(`${name} is out of stock right now. Remove it from your cart.`);
+        if (p.minQty && qty < p.minQty) {
+          throw new BadRequestException(`The minimum order for ${name} is ${p.minQty}. Change the quantity in your cart.`);
+        }
         const total = lineTotal(p, qty);
         subtotal = subtotal.add(total);
         itemRows.push({

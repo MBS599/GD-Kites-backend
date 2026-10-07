@@ -105,6 +105,7 @@ export class ProductsService {
         specs: cleanSpecs(dto.specs) ?? [],
         media: cleanMedia(dto.media) ?? (dto.imageUrl ? [{ type: 'image', url: dto.imageUrl }] : []),
         material: dto.material?.trim() || null,
+        minQty: dto.isCombo ? null : (dto.minQty ?? null),
         slabQty: dto.slabQty ?? null,
         slabPrice: dto.slabPrice == null ? null : new Prisma.Decimal(dto.slabPrice),
         imageUrl: dto.media ? coverOf(dto.media) : (dto.imageUrl ?? null),
@@ -153,6 +154,7 @@ export class ProductsService {
         specs: cleanSpecs(dto.specs),
         media: cleanMedia(dto.media),
         material: dto.material === undefined ? undefined : dto.material?.trim() || null,
+        minQty: isCombo ? null : dto.minQty,
         slabQty,
         slabPrice: slabPrice == null ? null : new Prisma.Decimal(slabPrice),
         // A new gallery sets the cover; an old client sending only imageUrl still works.

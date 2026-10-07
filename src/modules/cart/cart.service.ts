@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { lineTotal, unitPrice } from '../../common/pricing';
-import { isAvailable, productInclude, productOut } from '../../common/serializers';
+import { isAvailable, productDisplayName, productInclude, productOut } from '../../common/serializers';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const cartInclude = { items: { include: { product: { include: productInclude } }, orderBy: { addedAt: 'asc' } } } as const;
@@ -52,6 +52,9 @@ export class CartService {
     if (!p) throw new NotFoundException('Product not found.');
     if (!isAvailable(p)) throw new BadRequestException(`${p.name} is out of stock right now.`);
     if (qty < 1) throw new BadRequestException('Quantity must be at least 1.');
+    if (p.minQty && qty < p.minQty) {
+      throw new BadRequestException(`The minimum order for ${productDisplayName(p)} is ${p.minQty} ${p.unit === 'piece' ? 'pieces' : `${p.unit}s`}.`);
+    }
   }
 
   /** Adds [qty] to the existing line (or creates it). */

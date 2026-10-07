@@ -208,6 +208,8 @@ export function productOut(p: ProductWithCategory, { cost = false }: { cost?: bo
     media: mediaOf(p.media, p.imageUrl),
     material: p.material,
     size: p.size ? { id: p.size.id, name: p.size.name } : null,
+    /** Smallest quantity a customer can order; null = none. */
+    minQty: p.minQty,
     slabQty: p.slabQty,
     slabPrice: money(p.slabPrice),
     imageUrl: p.imageUrl,

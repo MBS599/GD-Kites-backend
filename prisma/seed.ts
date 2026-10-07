@@ -125,7 +125,7 @@ async function main() {
     }),
     charkha: await mkProduct({
       name: 'Wooden Charkha 12 in.', category: 'accessories', price: 120,
-      material: 'Sheesham wood', rating: 4.3, buyerCount: 41,
+      material: 'Sheesham wood', rating: 4.3, buyerCount: 41, minQty: 6,
       description: 'Hand-turned wooden spool with steel axle.',
     }),
     paperLarge: await mkProduct({

@@ -29,50 +29,50 @@ const SIGN = '\n\n— GD Kite Center, Kondhwa, Pune';
 
 export const WA_TEMPLATES: Record<SmsEvent, WaTemplate> = {
   orderPlaced: {
-    name: 'gdk_order_placed_v2',
+    name: 'gdk_order_placed_v3',
     category: 'UTILITY',
     body:
-      'Hello {{1}},\n\nThank you for your order with *GD Kite Center*.\n\n*Order:* {{2}}\n*Items:* {{3}}\n*Total:* Rs {{4}}\n' +
-      '*Deliver to:* {{5}}\n\nWe will confirm your order shortly and keep you updated here.' +
+      'Hi {{1}},\n\nThank you for your order! We have received order *#{{2}}* for {{3}} ' +
+      '(total *Rs {{4}}*), to be delivered at {{5}}.\n\nWe will confirm it shortly and keep you updated here.' +
       SIGN,
-    examples: ['Mayur Traders', 'GD1037', '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord', '2,980', 'Katraj, Pune'],
+    examples: ['Mayur', 'GD1037', '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord', '2,980', 'Shop 14, Katraj, Pune'],
     params: same,
   },
   orderConfirmed: {
-    name: 'gdk_order_confirmed_v2',
+    name: 'gdk_order_confirmed_v3',
     category: 'UTILITY',
     body:
-      'Hello {{1}},\n\nGood news! Your order *{{2}}* is confirmed and is being packed.\n\n*Items:* {{3}}\n*Total:* Rs {{4}}\n\n' +
-      'It will reach you within 3–4 working days. We will message you when it is out for delivery.' +
+      'Hi {{1}},\n\nGood news! Your order *#{{2}}* for {{3}} (*Rs {{4}}*) is confirmed and is being packed. ' +
+      'It will reach you within 3–4 working days, and we will message you when it is out for delivery.' +
       SIGN,
-    examples: ['Mayur Traders', 'GD1037', '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord', '2,980'],
+    examples: ['Mayur', 'GD1037', '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord', '2,980'],
     params: same,
   },
   driverAssigned: {
-    name: 'gdk_driver_assigned_v2',
+    name: 'gdk_driver_assigned_v3',
     category: 'UTILITY',
     body:
-      'Hello {{1}},\n\n*{{2}}* ({{3}}) will deliver your order *{{4}}*. You will get your delivery code when it is on the way.' +
+      'Hi {{1}},\n\nYour order *#{{2}}* for {{3}} will be delivered by *{{4}}* ({{5}}). ' +
+      'You will get your delivery code when it is on the way.' +
       SIGN,
-    examples: ['Mayur Traders', 'Rahul Patil', '+91 98220 11122', 'GD1037'],
-    // Event order is [name, order, driver, phone]; the text names the driver first.
-    params: ([name, order, driver, phone]) => [name, driver, phone, order],
+    examples: ['Mayur', 'GD1037', '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord', 'Gaurav Dhamal', '+91 98220 11122'],
+    params: same,
   },
   outForDelivery: {
-    name: 'gdk_out_for_delivery_v2',
+    name: 'gdk_out_for_delivery_v3',
     category: 'UTILITY',
     body:
-      'Hello {{1}},\n\nYour order *{{2}}* is out for delivery with *{{3}}* ({{4}}).\n\n*Delivery code: {{5}}*\n' +
-      'Share this code with the driver only after you have received all your items.' +
+      'Hi {{1}},\n\nYour order *#{{2}}* for {{3}} is out for delivery with *{{4}}* ({{5}}).\n\n' +
+      '*Delivery code: {{6}}*\nShare this code with the driver only after you have received all your items.' +
       SIGN,
-    examples: ['Mayur Traders', 'GD1037', 'Rahul Patil', '+91 98220 11122', '4821'],
+    examples: ['Mayur', 'GD1037', '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord', 'Gaurav Dhamal', '+91 98220 11122', '4821'],
     params: same,
   },
   deliveryOtp: {
-    name: 'gdk_delivery_code_v2',
+    name: 'gdk_delivery_code_v3',
     category: 'UTILITY',
     body:
-      'Your delivery code for GD Kite Center order *{{1}}* is *{{2}}*.\n\n' +
+      'Your delivery code for order *#{{1}}* is *{{2}}*.\n\n' +
       'Share it with the driver only after you have received your order.' +
       SIGN,
     examples: ['GD1037', '4821'],
@@ -87,57 +87,57 @@ export const WA_TEMPLATES: Record<SmsEvent, WaTemplate> = {
     params: same,
   },
   orderDelivered: {
-    name: 'gdk_order_delivered_v2',
+    name: 'gdk_order_delivered_v3',
     category: 'UTILITY',
     body:
-      'Hello {{1}},\n\nYour order *{{2}}* has been delivered.\n\n*Items:* {{3}}\n*Amount:* Rs {{4}}\n\n' +
-      'Thank you for shopping with GD Kite Center. We look forward to serving you again.' +
+      'Hi {{1}},\n\nYour order *#{{2}}* for {{3}} has been delivered (*Rs {{4}}*).\n\n' +
+      'Thank you for shopping with GD Kite Center. We look forward to serving you again!' +
       SIGN,
-    examples: ['Mayur Traders', 'GD1037', '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord', '2,980'],
+    examples: ['Mayur', 'GD1037', '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord', '2,980'],
     params: same,
   },
   orderCancelled: {
-    name: 'gdk_order_cancelled_v2',
+    name: 'gdk_order_cancelled_v3',
     category: 'UTILITY',
     body:
-      'Hello {{1}},\n\nWe are sorry, your order *{{2}}* has been cancelled.\n\n*Items:* {{3}}\n*Reason:* {{4}}\n\n' +
+      'Hi {{1}},\n\nWe are sorry, your order *#{{2}}* for {{3}} has been cancelled. Reason: {{4}}.\n\n' +
       'If you have any questions, simply reply to this message.' +
       SIGN,
-    examples: ['Mayur Traders', 'GD1037', '100 × Premium Fighter Kite (Medium)', 'Out of stock'],
+    examples: ['Mayur', 'GD1037', '100 × Premium Fighter Kite (Medium)', 'Out of stock'],
     params: same,
   },
   driverWelcome: {
-    name: 'gdk_driver_welcome_v2',
+    name: 'gdk_driver_welcome_v3',
     category: 'UTILITY',
     body:
-      'Hello {{1}},\n\nWelcome to the *GD Kite Center* delivery team.\n\nInstall the GD Kites app and sign in with {{2}} ' +
+      'Hi {{1}},\n\nWelcome to the *GD Kite Center* delivery team. Install the GD Kites app and sign in with {{2}} ' +
       'to see your deliveries.' +
       SIGN,
     examples: ['Rahul', 'your mobile number'],
     params: same,
   },
   deliveryAssigned: {
-    name: 'gdk_delivery_assigned_v2',
+    name: 'gdk_delivery_assigned_v3',
     category: 'UTILITY',
     body:
-      'Hello {{1}},\n\nNew delivery assigned: *{{2}}*\n\n*Customer:* {{3}}\n*Area:* {{4}}\n*Items:* {{5}}\n\n' +
+      'Hi {{1}},\n\nYou have a new delivery: order *#{{2}}* for *{{3}}* in {{4}}, with {{5}}.\n\n' +
       'Open the GD Kites app to see the route and start the delivery.' +
       SIGN,
     examples: ['Rahul', 'GD1037', 'Mayur Traders', 'Katraj', '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord'],
     params: same,
   },
   deliveryRemoved: {
-    name: 'gdk_delivery_removed_v2',
+    name: 'gdk_delivery_removed_v3',
     category: 'UTILITY',
-    body: 'Delivery *{{1}}* is no longer assigned to you. No action is needed.' + SIGN,
+    body: 'Order *#{{1}}* is no longer assigned to you. No action is needed.' + SIGN,
     examples: ['GD1037'],
     params: same,
   },
   adminNewOrder: {
-    name: 'gdk_admin_new_order_v2',
+    name: 'gdk_admin_new_order_v3',
     category: 'UTILITY',
     body:
-      '*New order {{1}}*\n\n*Customer:* {{2}}\n*Items:* {{3}}\n*Total:* Rs {{4}}\n*Area:* {{5}}\n\n' +
+      'New order *#{{1}}* from *{{2}}* for {{3}} (total *Rs {{4}}*), delivering to {{5}}.\n\n' +
       'Please confirm it in the GD Kites app.',
     examples: ['GD1037', 'Mayur Traders', '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord', '2,980', 'Katraj'],
     params: same,

@@ -22,7 +22,7 @@ describe('WhatsApp templates', () => {
 
   it('renders the delivery code template with the order first', () => {
     expect(renderWhatsApp('deliveryOtp', ['4821', 'GD1037'])).toBe(
-      'Your delivery code for GD Kite Center order *GD1037* is *4821*.\n\n' +
+      'Your delivery code for order *#GD1037* is *4821*.\n\n' +
         'Share it with the driver only after you have received your order.\n\n— GD Kite Center, Kondhwa, Pune',
     );
     expect(renderWhatsApp('loginOtp', ['123456'])).toContain('verification code is:\n\n*123456*\n');
@@ -33,7 +33,7 @@ describe('WhatsApp templates', () => {
     expect(auth.category).toBe('AUTHENTICATION');
     expect(auth.components[2].buttons[0]).toEqual({ type: 'OTP', otp_type: 'COPY_CODE', text: 'Copy code' });
     const util = templateCreatePayload(WA_TEMPLATES.orderPlaced, 'en') as any;
-    expect(util.components[0].example.body_text[0][0]).toBe('Mayur Traders');
+    expect(util.components[0].example.body_text[0][0]).toBe('Mayur');
     expect(Object.keys(SMS_TEMPLATES)).toEqual(Object.keys(WA_TEMPLATES));
   });
 });
@@ -67,7 +67,7 @@ describe('WhatsAppProvider', () => {
       to: '919822011122',
       type: 'template',
       template: {
-        name: 'gdk_delivery_code_v2',
+        name: 'gdk_delivery_code_v3',
         language: { code: 'en' },
         components: [{ type: 'body', parameters: [{ type: 'text', text: 'GD1037' }, { type: 'text', text: '4821' }] }],
       },
@@ -93,27 +93,19 @@ describe('WhatsAppProvider', () => {
 });
 
 describe('order messages', () => {
-  it('greet the customer by name and list what they ordered', () => {
-    const text = renderWhatsApp('orderPlaced', [
-      'Mayur Traders',
-      'GD1037',
-      '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord',
-      '2,980',
-      'Shop 14, Katraj, Pune',
-    ]);
-    expect(text).toContain('Hello Mayur Traders,');
-    expect(text).toContain('*Items:* 100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord');
-    expect(text).toContain('*Total:* Rs 2,980');
-    expect(text).toContain('*Deliver to:* Shop 14, Katraj, Pune');
-    expect(renderWhatsApp('driverAssigned', ['Mayur Traders', 'GD1037', 'Rahul Patil', '+91 98220 11122'])).toContain(
-      '*Rahul Patil* (+91 98220 11122) will deliver your order *GD1037*',
+  it('greet by first name and say the order, items and driver in one sentence', () => {
+    const items = '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord';
+    expect(renderWhatsApp('driverAssigned', ['Mayur', 'GD4', items, 'Gaurav Dhamal', '+91 89833 93542'])).toContain(
+      `Hi Mayur,\n\nYour order *#GD4* for ${items} will be delivered by *Gaurav Dhamal* (+91 89833 93542).`,
     );
+    const placed = renderWhatsApp('orderPlaced', ['Mayur', 'GD4', items, '2,980', 'Shop 14, Katraj, Pune']);
+    expect(placed).toContain(`We have received order *#GD4* for ${items} (total *Rs 2,980*), to be delivered at Shop 14, Katraj, Pune.`);
   });
 });
 
 describe('push texts', () => {
   it('carry the event and order for tap handling; sign-in codes never go by push', () => {
-    expect(pushFor('outForDelivery', ['Mayur Traders', 'GD1037', 'Rahul Patil', '+91 98220 11122', '4821'], 'o1')).toEqual({
+    expect(pushFor('outForDelivery', ['Mayur', 'GD1037', '100 × Kite', 'Rahul Patil', '+91 98220 11122', '4821'], 'o1')).toEqual({
       title: 'Out for delivery',
       body: 'GD1037 is on the way with Rahul Patil. Delivery code: 4821',
       data: { type: 'outForDelivery', orderId: 'o1' },

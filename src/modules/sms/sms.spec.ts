@@ -18,14 +18,14 @@ describe('templates', () => {
   it('fills {#var#} in order; short values are capped at 40 characters, item lists at 300', () => {
     const text = renderSms('orderCancelled', ['N'.repeat(50), 'GD1030', 'i'.repeat(320), 'Out of stock']);
     expect(text).toBe(
-      `Hello ${'N'.repeat(39)}…, your GD Kite Center order GD1030 (${'i'.repeat(299)}…) was cancelled. Reason: Out of stock.`,
+      `Hi ${'N'.repeat(39)}…, we are sorry: your order #GD1030 for ${'i'.repeat(299)}… has been cancelled. Reason: Out of stock.`,
     );
     expect(clipVar('  a   b ')).toBe('a b');
   });
 
   it('every template uses its variables', () => {
     for (const event of Object.keys(SMS_TEMPLATES) as (keyof typeof SMS_TEMPLATES)[]) {
-      expect(varCount(event)).toBeLessThanOrEqual(5);
+      expect(varCount(event)).toBeLessThanOrEqual(6);
     }
   });
 });

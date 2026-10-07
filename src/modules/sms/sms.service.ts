@@ -89,12 +89,12 @@ export class SmsService {
   orderPlaced(o: FullOrder) {
     const code = orderCode(o.number);
     const items = itemsLine(o.items);
-    this.toCustomer(o, 'orderPlaced', [o.contactName, code, items, money(o.total), placeOf(o)]);
+    this.toCustomer(o, 'orderPlaced', [firstName(o.contactName), code, items, money(o.total), placeOf(o)]);
     this.toAdmins('adminNewOrder', [code, o.contactName, items, money(o.total), o.addrArea], o.id);
   }
 
   orderConfirmed(o: FullOrder) {
-    this.toCustomer(o, 'orderConfirmed', [o.contactName, orderCode(o.number), itemsLine(o.items), money(o.total)]);
+    this.toCustomer(o, 'orderConfirmed', [firstName(o.contactName), orderCode(o.number), itemsLine(o.items), money(o.total)]);
   }
 
   /** New driver told, customer told who is coming, a replaced driver told it is gone. */
@@ -103,7 +103,13 @@ export class SmsService {
     if (!d) return;
     const code = orderCode(o.number);
     this.later(async () =>
-      this.toCustomer(o, 'driverAssigned', [o.contactName, code, d.user.name, await this.driverContact(d.user)]),
+      this.toCustomer(o, 'driverAssigned', [
+        firstName(o.contactName),
+        code,
+        itemsLine(o.items),
+        d.user.name,
+        await this.driverContact(d.user),
+      ]),
     );
     // The owner delivering themselves already knows (they assigned it).
     if (d.user.role !== 'ADMIN') {
@@ -117,7 +123,14 @@ export class SmsService {
     const d = o.delivery?.driver;
     if (!d) return;
     this.later(async () =>
-      this.toCustomer(o, 'outForDelivery', [o.contactName, orderCode(o.number), d.user.name, await this.driverContact(d.user), otp]),
+      this.toCustomer(o, 'outForDelivery', [
+        firstName(o.contactName),
+        orderCode(o.number),
+        itemsLine(o.items),
+        d.user.name,
+        await this.driverContact(d.user),
+        otp,
+      ]),
     );
   }
 
@@ -158,12 +171,12 @@ export class SmsService {
   }
 
   orderDelivered(o: FullOrder) {
-    this.toCustomer(o, 'orderDelivered', [o.contactName, orderCode(o.number), itemsLine(o.items), money(o.total)]);
+    this.toCustomer(o, 'orderDelivered', [firstName(o.contactName), orderCode(o.number), itemsLine(o.items), money(o.total)]);
   }
 
   orderCancelled(o: FullOrder, reason: string, revokedDriverId: string | null) {
     const code = orderCode(o.number);
-    this.toCustomer(o, 'orderCancelled', [o.contactName, code, itemsLine(o.items), reason]);
+    this.toCustomer(o, 'orderCancelled', [firstName(o.contactName), code, itemsLine(o.items), reason]);
     if (revokedDriverId) this.toDriverId(revokedDriverId, 'deliveryRemoved', [code], o.id);
   }
 

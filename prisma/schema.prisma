@@ -239,6 +239,9 @@ model Product {
   /// From the size master; shown in the product name for customers, e.g. "Fighter Kite (Medium)".
   sizeId      String?
   size        Size?       @relation(fields: [sizeId], references: [id], onDelete: SetNull)
+  /// Smallest quantity a customer can order (e.g. 6 for charkhas); null = no minimum.
+  /// The product page adds this many at a time (else packs of 50).
+  minQty      Int?
   /// Wholesale slab: above slabQty the unit price becomes slabPrice.
   slabQty     Int?
   slabPrice   Decimal?    @db.Decimal(10, 2)
