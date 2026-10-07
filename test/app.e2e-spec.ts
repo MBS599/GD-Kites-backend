@@ -202,6 +202,30 @@ describe('GD Kite Center API (e2e)', () => {
       await http.patch(`${API}/users/me`).set(auth(driver)).send({ email: 'x@example.com' }).expect(403);
     });
 
+    it('one account per email and per mobile number', async () => {
+      const mk = (name: string, phone: string | null, email: string | null) =>
+        prisma.user.create({ data: { name, phone, email, role: 'CUSTOMER', cart: { create: {} } }, include: { driverProfile: true } });
+      const a = await mk('Unique A', '+91 97000 11111', null);
+      const b = await mk('Unique B', null, null);
+      const { refreshTokenId: _a, ...sb } = await app.get(AuthService).startSession(b);
+      // Email: any capitalisation of an existing address is the same address.
+      await http.patch(`${API}/users/me`).set(auth(sb)).send({ email: 'MAYUR.Traders@Gmail.com' }).expect(409);
+      // Mobile: the same number written differently is still taken.
+      for (const phone of ['9700011111', '+91 97000 11111', '+919700011111']) {
+        await http.patch(`${API}/users/me`).set(auth(sb)).send({ phone }).expect(409);
+      }
+      await http.patch(`${API}/users/me`).set(auth(sb)).send({ phone: '9700022222' }).expect(200);
+      // Saving your own number again is fine.
+      const { refreshTokenId: _b, ...sa } = await app.get(AuthService).startSession(a);
+      await http.patch(`${API}/users/me`).set(auth(sa)).send({ phone: '+91 97000 11111' }).expect(200);
+      // Adding a driver with a number a customer already has is refused.
+      await http
+        .post(`${API}/drivers`)
+        .set(auth(admin))
+        .send({ name: 'Dup Driver', email: 'dup.driver@example.com', phone: '9700011111', type: 'gd', vehicleNumber: 'MH12AB0001' })
+        .expect(409);
+    });
+
     it('rotates refresh tokens and revokes the family on reuse', async () => {
       const s = await login('patilkitehouse@gmail.com');
       const r1 = await http.post(`${API}/auth/refresh`).send({ refreshToken: s.refreshToken }).expect(200);
@@ -529,7 +553,7 @@ describe('GD Kite Center API (e2e)', () => {
 
       // Out-for-delivery SMS carries the code, the stored copy does not.
       const sms = await smsFor(order.id);
-      expect(sms.find((m) => m.event === 'outForDelivery')!.body).toContain('Share OTP ••••');
+      expect(sms.find((m) => m.event === 'outForDelivery')!.body).toContain('Delivery code ••••');
 
       // Resend too soon.
       await http.post(`${API}/orders/${order.id}/delivery-otp/resend`).set(auth(customer)).expect(429);
@@ -633,7 +657,7 @@ describe('GD Kite Center API (e2e)', () => {
       const status = (await http.get(`${API}/sms/status`).set(auth(admin)).expect(200)).body;
       expect(status.provider).toBe('log');
       expect(status).toMatchObject({ channel: 'whatsapp', pushEnabled: false });
-      expect(status.events.find((e: any) => e.event === 'orderPlaced')).toMatchObject({ whatsappTemplate: 'gdk_order_placed', text: expect.stringContaining('GD1037') });
+      expect(status.events.find((e: any) => e.event === 'orderPlaced')).toMatchObject({ whatsappTemplate: 'gdk_order_placed_v2', text: expect.stringContaining('GD1037') });
       const test = (await http.post(`${API}/sms/test`).set(auth(admin)).send({ phone: '98220 11122' }).expect(200)).body;
       expect(test).toMatchObject({ status: 'logged', to: '919822011122' });
       const bad = (await http.post(`${API}/sms/test`).set(auth(admin)).send({ phone: '12345' }).expect(200)).body;
@@ -1178,7 +1202,7 @@ describe('GD Kite Center API (e2e)', () => {
       const res = await http
         .post(`${API}/drivers`)
         .set(auth(admin))
-        .send({ name: 'Vikas Shinde', email: 'vikas@example.com', phone: '+91 90000 11111', type: 'external', vehicleNumber: 'mh12 ab 1234' })
+        .send({ name: 'Vikas Shinde', email: 'vikas@example.com', phone: '+91 90000 33344', type: 'external', vehicleNumber: 'mh12 ab 1234' })
         .expect(201);
       expect(res.body.driver.vehicleNumber).toBe('MH12 AB 1234');
       const s = await login('vikas@example.com');
@@ -1407,6 +1431,22 @@ describe('GD Kite Center API (e2e)', () => {
       expect((await http.get(`${API}/drivers`).set(auth(admin))).body.drivers.some((d: any) => d.id === me.id)).toBe(false);
       await http.get(`${API}/deliveries`).set(auth(admin)).expect(403);
       expect((await http.get(`${API}/orders/${order.id}`).set(auth(admin))).body.order.status).toBe('delivered');
+    });
+  });
+
+  describe('app updates', () => {
+    it('the app learns the newest build and the force-update minimum set by the admin', async () => {
+      const v = (await http.get(`${API}/app/version`).expect(200)).body.android;
+      expect(v).toMatchObject({ minBuild: 0, message: null });
+      expect(v.url).toMatch(/\.apk$/);
+      await http.patch(`${API}/settings`).set(auth(customer)).send({ androidMinBuild: 5 }).expect(403);
+      const s = (await http.patch(`${API}/settings`).set(auth(admin)).send({ androidMinBuild: 42, updateMessage: '  New photos  ' }).expect(200))
+        .body.settings;
+      expect(s).toMatchObject({ androidMinBuild: 42, updateMessage: 'New photos' });
+      expect((await http.get(`${API}/app/version`).expect(200)).body.android).toMatchObject({ minBuild: 42, message: 'New photos' });
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ androidMinBuild: -1 }).expect(400);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ androidMinBuild: 0, updateMessage: '' }).expect(200);
+      expect((await http.get(`${API}/app/version`)).body.android).toMatchObject({ minBuild: 0, message: null });
     });
   });
 

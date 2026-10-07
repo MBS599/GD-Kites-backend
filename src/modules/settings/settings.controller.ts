@@ -1,6 +1,10 @@
 import { BadRequestException, Body, Controller, Get, Injectable, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsInt, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { readFile } from 'node:fs/promises';
+import { Transform } from 'class-transformer';
+import { IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { Public } from '../../common/auth.decorators';
+import { AppConfig } from '../../config/app-config.service';
 import { Roles } from '../../common/auth.decorators';
 import type { AppSettings, VehicleType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -58,6 +62,15 @@ export class UpdateSettingsDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(10_000_000) minOrderValue?: number;
   /** Vehicle type whose rate sets the customer delivery charge (the Tempo). */
   @IsOptional() @IsUUID() deliveryVehicleTypeId?: string;
+  /** Force update: Android builds below this must update first. 0 turns it off. */
+  @IsOptional() @IsInt() @Min(0) @Max(1_000_000_000) androidMinBuild?: number;
+  /** Text on the update screens (what changed). Empty/null for the default. */
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() || null : value))
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @MaxLength(300)
+  updateMessage?: string | null;
 }
 
 const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
@@ -69,6 +82,8 @@ const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
   minOrderValue: s.minOrderValue.toNumber(),
   /** Customer delivery charge = this vehicle's baseFare + perKm × km (null = default ₹150 + ₹25/km). */
   deliveryVehicleType: s.deliveryVehicleType ? vehicleTypeOut(s.deliveryVehicleType) : null,
+  androidMinBuild: s.androidMinBuild,
+  updateMessage: s.updateMessage,
 });
 
 @ApiTags('Settings')
@@ -100,5 +115,65 @@ export class SettingsController {
       include: { deliveryVehicleType: true },
     });
     return { settings: out(s) };
+  }
+}
+
+/** What CI publishes next to the APK (downloads/version.json). */
+interface PublishedBuild {
+  build: number;
+  version: string;
+  publishedAt?: string;
+}
+
+/**
+ * Android app updates. The newest build comes from the version file CI writes next
+ * to the APK; the minimum build (force update) and the message are admin settings.
+ */
+@ApiTags('App')
+@Controller('app')
+export class AppVersionController {
+  private cache?: { at: number; build: PublishedBuild | null };
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: AppConfig,
+  ) {}
+
+  private async published(): Promise<PublishedBuild | null> {
+    if (this.cache && Date.now() - this.cache.at < 60_000) return this.cache.build;
+    let build: PublishedBuild | null = null;
+    try {
+      const j = JSON.parse(await readFile(this.config.get('APP_VERSION_FILE'), 'utf8')) as Partial<PublishedBuild>;
+      if (Number.isInteger(j.build) && (j.build as number) > 0) {
+        build = { build: j.build as number, version: String(j.version ?? ''), publishedAt: j.publishedAt };
+      }
+    } catch {
+      // No APK published yet (or unreadable): no update offered.
+    }
+    this.cache = { at: Date.now(), build };
+    return build;
+  }
+
+  /** Public: the app asks on start and when it comes back to the foreground. */
+  @Public()
+  @Get('version')
+  async version() {
+    const s = await this.prisma.appSettings.findUnique({
+      where: { id: 1 },
+      select: { androidMinBuild: true, updateMessage: true },
+    });
+    const latest = await this.published();
+    return {
+      android: {
+        /** Newest published build (null until CI has published one). */
+        latestBuild: latest?.build ?? null,
+        latestVersion: latest?.version ?? null,
+        publishedAt: latest?.publishedAt ?? null,
+        /** Builds below this must update before the app can be used (0 = no force update). */
+        minBuild: s?.androidMinBuild ?? 0,
+        message: s?.updateMessage ?? null,
+        url: this.config.get('APK_URL'),
+      },
+    };
   }
 }

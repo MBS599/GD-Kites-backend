@@ -8,6 +8,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { PHONE_TAKEN, phoneInUse } from '../../common/phone-unique';
 import type { UserWithDriver } from '../../common/serializers';
 import { AppConfig } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -146,10 +147,8 @@ export class PhoneOtpService {
   async link(userId: string, raw: string, code: string): Promise<UserWithDriver> {
     const phone = this.phone(raw);
     const challenge = await this.check(phone, code);
-    const owner = await this.prisma.user.findUnique({ where: { phoneVerified: phone }, select: { id: true } });
-    if (owner && owner.id !== userId) {
-      throw new ConflictException('This number is already used by another GD Kites account.');
-    }
+    // One account per number: verified elsewhere, or saved on another account.
+    if (await phoneInUse(this.prisma, phone, userId)) throw new ConflictException(PHONE_TAKEN);
     await this.consume(challenge.id);
     return this.prisma.user.update({
       where: { id: userId },

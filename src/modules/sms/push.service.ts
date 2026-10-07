@@ -14,19 +14,19 @@ export interface PushMessage {
 
 /** Push text per event, from the same variables as the SMS/WhatsApp message. */
 const PUSH: Partial<Record<SmsEvent, (v: string[]) => Omit<PushMessage, 'data'>>> = {
-  orderPlaced: ([, code, amount]) => ({ title: 'Order placed', body: `${code} · Rs ${amount}. We will confirm it shortly.` }),
-  orderConfirmed: ([code]) => ({ title: 'Order confirmed', body: `${code} is confirmed and being packed.` }),
-  driverAssigned: ([code, driver]) => ({ title: 'Driver assigned', body: `${driver} will deliver ${code}.` }),
-  outForDelivery: ([code, driver, , otp]) => ({
+  orderPlaced: ([, code, , amount]) => ({ title: 'Order placed', body: `${code} · Rs ${amount}. We will confirm it shortly.` }),
+  orderConfirmed: ([, code]) => ({ title: 'Order confirmed', body: `${code} is confirmed and being packed.` }),
+  driverAssigned: ([, code, driver]) => ({ title: 'Driver assigned', body: `${driver} will deliver ${code}.` }),
+  outForDelivery: ([, code, driver, , otp]) => ({
     title: 'Out for delivery',
     body: `${code} is on the way with ${driver}. Delivery code: ${otp}`,
   }),
   deliveryOtp: ([otp, code]) => ({ title: 'Delivery code', body: `Code for ${code}: ${otp}. Share it only when you receive your order.` }),
-  orderDelivered: ([code, amount]) => ({ title: 'Delivered', body: `${code} delivered (Rs ${amount}). Thank you!` }),
-  orderCancelled: ([code, reason]) => ({ title: 'Order cancelled', body: `${code}: ${reason}` }),
-  deliveryAssigned: ([code, name, area]) => ({ title: 'New delivery', body: `${code} for ${name}, ${area}` }),
+  orderDelivered: ([, code, , amount]) => ({ title: 'Delivered', body: `${code} delivered (Rs ${amount}). Thank you!` }),
+  orderCancelled: ([, code, , reason]) => ({ title: 'Order cancelled', body: `${code}: ${reason}` }),
+  deliveryAssigned: ([, code, name, area]) => ({ title: 'New delivery', body: `${code} for ${name}, ${area}` }),
   deliveryRemoved: ([code]) => ({ title: 'Delivery removed', body: `${code} is no longer assigned to you.` }),
-  adminNewOrder: ([code, name, amount]) => ({ title: 'New order', body: `${code} from ${name} · Rs ${amount}` }),
+  adminNewOrder: ([code, name, , amount]) => ({ title: 'New order', body: `${code} from ${name} · Rs ${amount}` }),
 };
 
 export function pushFor(event: SmsEvent, vars: string[], orderId?: string): PushMessage | null {

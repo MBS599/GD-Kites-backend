@@ -27,7 +27,7 @@ import { ReportsController } from './reports/reports.controller';
 import { UploadsController } from './uploads/uploads.controller';
 import { ServiceAreasController } from './service-areas/service-areas.controller';
 import { ServiceAreasService } from './service-areas/service-areas.service';
-import { SettingsController, SettingsService } from './settings/settings.controller';
+import { AppVersionController, SettingsController, SettingsService } from './settings/settings.controller';
 import { PaymentsController, RazorpayWebhookController } from './payments/payments.controller';
 import { PaymentsService } from './payments/payments.service';
 import { RazorpayClient } from './payments/razorpay.client';
@@ -64,7 +64,7 @@ export class SmsModule {}
 /** Admin-managed geofences; the resolver is used by addresses and checkout. */
 @Global()
 @Module({
-  controllers: [ServiceAreasController, SettingsController],
+  controllers: [ServiceAreasController, SettingsController, AppVersionController],
   providers: [ServiceAreasService, SettingsService],
   exports: [ServiceAreasService, SettingsService],
 })

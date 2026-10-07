@@ -1,6 +1,7 @@
 import type { AuthUser } from '../../common/auth.decorators';
 import { pageArgs, toPage, type PageQuery } from '../../common/paging';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { PHONE_TAKEN, phoneInUse } from '../../common/phone-unique';
 import { Prisma, type DriverType } from '@prisma/client';
 import { driverInclude, driverOut, orderInclude, orderOut, type DriverWithUser, type FullOrder } from '../../common/serializers';
 import { startOfToday } from '../../common/time';
@@ -174,6 +175,7 @@ export class DriversService {
       const existing = await tx.user.findUnique({ where: { email }, include: { driverProfile: true } });
       if (existing?.role === 'ADMIN') throw new ConflictException('This email belongs to an admin account.');
       if (existing?.driverProfile) throw new ConflictException('This person is already registered as a driver.');
+      if (await phoneInUse(this.prisma, input.phone, existing?.id)) throw new ConflictException(PHONE_TAKEN);
       const user = existing
         ? await tx.user.update({ where: { id: existing.id }, data: { role: 'DRIVER', phone: input.phone } })
         : await tx.user.create({ data: { email, name: input.name.trim(), phone: input.phone, role: 'DRIVER' } });

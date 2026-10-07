@@ -1,5 +1,6 @@
 import { Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { PHONE_TAKEN, phoneInUse } from '../../common/phone-unique';
 import type { OrderStatus } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf, IsBoolean } from 'class-validator';
@@ -57,6 +58,10 @@ export class UsersController {
     const changed = dto.phone !== undefined && normalizeIndianMobile(dto.phone) !== user.phoneVerified;
     if (changed && user.phoneVerified && !user.googleSub) {
       throw new ConflictException('Your mobile number is how you sign in. Contact GD Kite Center to change it.');
+    }
+    // One account per mobile number (verified or just saved).
+    if (dto.phone !== undefined && (await phoneInUse(this.prisma, dto.phone, user.id))) {
+      throw new ConflictException(PHONE_TAKEN);
     }
     let email: string | undefined;
     if (dto.email !== undefined) {

@@ -128,6 +128,10 @@ model AppSettings {
   /// Customer delivery charge = this vehicle type's baseFare + perKm × km from hub (the Tempo).
   deliveryVehicleTypeId String?
   deliveryVehicleType   VehicleType? @relation("DeliveryChargeVehicle", fields: [deliveryVehicleTypeId], references: [id], onDelete: SetNull)
+  /// Force update: Android builds below this number must update before they can be used (0 = off).
+  androidMinBuild    Int      @default(0)
+  /// Shown on the update screens (e.g. what changed); null for the default text.
+  updateMessage      String?
   updatedAt          DateTime @updatedAt
 }
 

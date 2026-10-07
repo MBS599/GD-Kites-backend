@@ -5,7 +5,7 @@ import { orderCode, type FullOrder } from '../../common/serializers';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LogSmsProvider, SmsProviderError, WhatsAppProvider, WhatsAppWebProvider, type SmsProvider } from './sms.providers';
 import { WhatsAppWebSession } from './whatsapp-web.session';
-import { clipVar, maskSecret, renderSms, SMS_EVENTS, type SmsEvent } from './sms.templates';
+import { clipVars, maskSecret, renderSms, SMS_EVENTS, type SmsEvent } from './sms.templates';
 import { renderWhatsApp } from './whatsapp.templates';
 import { pushFor, PushService } from './push.service';
 
@@ -88,12 +88,13 @@ export class SmsService {
 
   orderPlaced(o: FullOrder) {
     const code = orderCode(o.number);
-    this.toCustomer(o, 'orderPlaced', [o.contactName, code, money(o.total)]);
-    this.toAdmins('adminNewOrder', [code, o.contactName, money(o.total)], o.id);
+    const items = itemsLine(o.items);
+    this.toCustomer(o, 'orderPlaced', [o.contactName, code, items, money(o.total), placeOf(o)]);
+    this.toAdmins('adminNewOrder', [code, o.contactName, items, money(o.total), o.addrArea], o.id);
   }
 
   orderConfirmed(o: FullOrder) {
-    this.toCustomer(o, 'orderConfirmed', [orderCode(o.number)]);
+    this.toCustomer(o, 'orderConfirmed', [o.contactName, orderCode(o.number), itemsLine(o.items), money(o.total)]);
   }
 
   /** New driver told, customer told who is coming, a replaced driver told it is gone. */
@@ -101,9 +102,13 @@ export class SmsService {
     const d = o.delivery?.driver;
     if (!d) return;
     const code = orderCode(o.number);
-    this.toCustomer(o, 'driverAssigned', [code, d.user.name, d.user.phone ?? '']);
+    this.later(async () =>
+      this.toCustomer(o, 'driverAssigned', [o.contactName, code, d.user.name, await this.driverContact(d.user)]),
+    );
     // The owner delivering themselves already knows (they assigned it).
-    if (d.user.role !== 'ADMIN') this.toUser(d.user, 'deliveryAssigned', [code, o.contactName, o.addrArea], o.id);
+    if (d.user.role !== 'ADMIN') {
+      this.toUser(d.user, 'deliveryAssigned', [firstName(d.user.name), code, o.contactName, o.addrArea, itemsLine(o.items)], o.id);
+    }
     if (previousDriverId && previousDriverId !== d.id) this.toDriverId(previousDriverId, 'deliveryRemoved', [code], o.id);
   }
 
@@ -111,7 +116,21 @@ export class SmsService {
   outForDelivery(o: FullOrder, otp: string) {
     const d = o.delivery?.driver;
     if (!d) return;
-    this.toCustomer(o, 'outForDelivery', [orderCode(o.number), d.user.name, d.user.phone ?? '', otp]);
+    this.later(async () =>
+      this.toCustomer(o, 'outForDelivery', [o.contactName, orderCode(o.number), d.user.name, await this.driverContact(d.user), otp]),
+    );
+  }
+
+  /**
+   * The number the customer can call about the delivery: the driver's, else (e.g. the
+   * owner delivering, signed in with Google) the shop's WhatsApp number.
+   */
+  private async driverContact(u: Pick<User, 'phone' | 'phoneVerified'>): Promise<string> {
+    if (u.phone?.trim()) return u.phone.trim();
+    if (u.phoneVerified) return `+${u.phoneVerified.slice(0, 2)} ${u.phoneVerified.slice(2, 7)} ${u.phoneVerified.slice(7)}`;
+    const s = await this.prisma.appSettings.findUnique({ where: { id: 1 }, select: { whatsappNumber: true } });
+    const n = s?.whatsappNumber;
+    return n ? `+${n.slice(0, 2)} ${n.slice(2, 7)} ${n.slice(7)}` : 'via GD Kite Center';
   }
 
   /** Customer asked for the delivery OTP again: sent even if they turned SMS updates off. */
@@ -139,17 +158,17 @@ export class SmsService {
   }
 
   orderDelivered(o: FullOrder) {
-    this.toCustomer(o, 'orderDelivered', [orderCode(o.number), money(o.total)]);
+    this.toCustomer(o, 'orderDelivered', [o.contactName, orderCode(o.number), itemsLine(o.items), money(o.total)]);
   }
 
   orderCancelled(o: FullOrder, reason: string, revokedDriverId: string | null) {
     const code = orderCode(o.number);
-    this.toCustomer(o, 'orderCancelled', [code, reason]);
+    this.toCustomer(o, 'orderCancelled', [o.contactName, code, itemsLine(o.items), reason]);
     if (revokedDriverId) this.toDriverId(revokedDriverId, 'deliveryRemoved', [code], o.id);
   }
 
   driverWelcome(user: User) {
-    this.toUser(user, 'driverWelcome', [user.name.split(' ')[0], user.email ?? 'your mobile number']);
+    this.toUser(user, 'driverWelcome', [firstName(user.name), user.email ?? 'your mobile number']);
   }
 
   /** Admin test from Settings; bypasses dedupe and opt-out, waits for the result. */
@@ -163,7 +182,7 @@ export class SmsService {
 
   /** Push (free, always) plus WhatsApp/SMS (unless the user turned messages off). */
   private push(userId: string, event: SmsEvent, vars: Job['vars'], orderId?: string) {
-    this.pushService.notifyUser(userId, pushFor(event, vars.map(clipVar), orderId));
+    this.pushService.notifyUser(userId, pushFor(event, clipVars(event, vars), orderId));
   }
 
   private toCustomer(o: FullOrder, event: SmsEvent, vars: Job['vars']) {
@@ -218,7 +237,7 @@ export class SmsService {
     if (this.allowlist.size && !this.allowlist.has(job.to)) {
       return this.record(job, 'SKIPPED', 'Testing allowlist: number not in MESSAGING_ALLOWLIST');
     }
-    const vars = job.vars.map(clipVar);
+    const vars = clipVars(job.event, job.vars);
     const text = this.render(job.event, vars);
     // What we store: one-time codes masked.
     const logText = this.render(job.event, vars, true);
@@ -262,7 +281,7 @@ export class SmsService {
     job: Job,
     status: 'SENT' | 'LOGGED' | 'FAILED' | 'SKIPPED',
     error: string | null,
-    text = this.render(job.event, job.vars.map(clipVar), true),
+    text = this.render(job.event, clipVars(job.event, job.vars), true),
     providerRef?: string,
   ) {
     return this.prisma.smsMessage.create({
@@ -282,6 +301,19 @@ export class SmsService {
 }
 
 const money = (v: { toString(): string } | number) => Math.round(Number(v.toString())).toLocaleString('en-IN');
+
+const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
+
+/** "100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord, +3 more" for messages. */
+export function itemsLine(items: Pick<FullOrder['items'][number], 'qty' | 'productName'>[], shown = 4) {
+  const parts = items.slice(0, shown).map((i) => `${i.qty.toLocaleString('en-IN')} × ${i.productName}`);
+  if (items.length > shown) parts.push(`+${items.length - shown} more`);
+  return parts.join(', ');
+}
+
+/** Where the order goes, short: "Katraj Chowk, Katraj, Pune". */
+const placeOf = (o: Pick<FullOrder, 'addrLine' | 'addrArea' | 'addrCity'>) =>
+  [o.addrLine, o.addrArea, o.addrCity].filter((p) => p && p.trim()).join(', ');
 
 /** 98220 11122 / +91-9822011122 / 09822011122 → 919822011122; null if not an Indian mobile. */
 export function normalizeIndianMobile(raw: string | null | undefined): string | null {

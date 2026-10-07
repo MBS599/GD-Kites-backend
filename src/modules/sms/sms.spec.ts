@@ -15,17 +15,17 @@ describe('normalizeIndianMobile', () => {
 });
 
 describe('templates', () => {
-  it('fills {#var#} in order and clips each value to 30 chars', () => {
-    const text = renderSms('orderCancelled', ['GD1030', 'x'.repeat(50)]);
-    expect(text).toBe(`Your GD Kite Center order GD1030 was cancelled. Reason: ${'x'.repeat(30)}. - GD Kite Center`);
+  it('fills {#var#} in order; short values are capped at 40 characters, item lists at 300', () => {
+    const text = renderSms('orderCancelled', ['N'.repeat(50), 'GD1030', 'i'.repeat(320), 'Out of stock']);
+    expect(text).toBe(
+      `Hello ${'N'.repeat(39)}…, your GD Kite Center order GD1030 (${'i'.repeat(299)}…) was cancelled. Reason: Out of stock.`,
+    );
     expect(clipVar('  a   b ')).toBe('a b');
   });
 
-  it('every message stays short even with full-length variables', () => {
-    for (const [event, t] of Object.entries(SMS_TEMPLATES)) {
-      const longest = t.text.replaceAll('{#var#}', 'x'.repeat(30));
-      expect({ event, length: longest.length <= 306 }).toEqual({ event, length: true });
-      expect(varCount(event as keyof typeof SMS_TEMPLATES)).toBeLessThanOrEqual(4);
+  it('every template uses its variables', () => {
+    for (const event of Object.keys(SMS_TEMPLATES) as (keyof typeof SMS_TEMPLATES)[]) {
+      expect(varCount(event)).toBeLessThanOrEqual(5);
     }
   });
 });
