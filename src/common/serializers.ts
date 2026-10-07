@@ -245,7 +245,8 @@ export function driverOut(d: DriverWithUser, counts?: { activeDeliveries?: numbe
     id: d.id,
     userId: d.userId,
     name: d.user.name,
-    phone: d.user.phone ?? '',
+    /** The saved number, else the one verified by OTP; '' when neither (the app then offers the shop's number). */
+    phone: d.user.phone?.trim() || (d.user.phoneVerified ? `+91 ${d.user.phoneVerified.slice(2, 7)} ${d.user.phoneVerified.slice(7)}` : ''),
     email: d.user.email,
     type: camel(d.type),
     availability: camel(d.availability),
