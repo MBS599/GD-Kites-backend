@@ -1,4 +1,4 @@
-import { Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, Patch } from '@nestjs/common';
+import { Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { PHONE_TAKEN, phoneInUse } from '../../common/phone-unique';
 import type { OrderStatus } from '@prisma/client';
@@ -84,6 +84,18 @@ export class UsersController {
         businessName: user.role === 'CUSTOMER' ? dto.businessName?.trim() : undefined,
         smsEnabled: dto.smsEnabled,
       },
+      include: { driverProfile: true },
+    });
+    return { user: userOut(updated) };
+  }
+
+  /** The user opened their notifications: everything so far is read. */
+  @Post('me/notifications-seen')
+  @HttpCode(200)
+  async notificationsSeen(@CurrentUser() user: AuthUser) {
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { notificationsSeenAt: new Date() },
       include: { driverProfile: true },
     });
     return { user: userOut(updated) };

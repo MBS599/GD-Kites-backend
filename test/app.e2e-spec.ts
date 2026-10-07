@@ -1451,6 +1451,18 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('notifications', () => {
+    it('order history says who made each change; opening notifications marks them read', async () => {
+      const orders = (await http.get(`${API}/orders`).set(auth(customer)).expect(200)).body.orders;
+      const placed = orders.flatMap((o: any) => o.history).find((e: any) => e.status === 'pending');
+      expect(placed).toHaveProperty('actorId');
+      const before = Date.now();
+      const user = (await http.post(`${API}/users/me/notifications-seen`).set(auth(customer)).expect(200)).body.user;
+      expect(new Date(user.notificationsSeenAt).getTime()).toBeGreaterThanOrEqual(before - 1000);
+      expect((await http.get(`${API}/auth/me`).set(auth(customer))).body.user.notificationsSeenAt).toBe(user.notificationsSeenAt);
+    });
+  });
+
   describe('app updates', () => {
     it('the app learns the newest build and the force-update minimum set by the admin', async () => {
       const v = (await http.get(`${API}/app/version`).expect(200)).body.android;

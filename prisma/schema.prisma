@@ -70,6 +70,8 @@ model User {
   phoneVerified String?        @unique
   businessName  String?
   photoUrl      String?
+  /// Last time the user opened their notifications: later order updates count as unread.
+  notificationsSeenAt DateTime?
   googleSub     String?        @unique
   /// Assigned server-side only. Public Google sign-up always creates CUSTOMER.
   role          Role           @default(CUSTOMER)

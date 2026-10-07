@@ -148,6 +148,8 @@ export function userOut(u: UserWithDriver) {
     /** Set for drivers, and for admins who also deliver. */
     driverId: u.driverProfile?.isActive ? u.driverProfile.id : null,
     smsEnabled: u.smsEnabled,
+    /** Order updates after this are unread (the bell's count). */
+    notificationsSeenAt: u.notificationsSeenAt?.toISOString() ?? null,
   };
 }
 
@@ -332,7 +334,8 @@ export function orderOut(o: FullOrder, { driverLocation = false }: { driverLocat
     deliveredAt: o.deliveredAt?.toISOString() ?? null,
     history: [...o.history]
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-      .map((e) => ({ status: camel(e.status), at: e.createdAt.toISOString(), note: e.note })),
+      // actorId: who made the change, so a user's own actions don't count as unread notifications.
+      .map((e) => ({ status: camel(e.status), at: e.createdAt.toISOString(), note: e.note, actorId: e.actorId })),
     proof:
       d && d.status === 'DELIVERED'
         ? {
