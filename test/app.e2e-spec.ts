@@ -1406,7 +1406,8 @@ describe('GD Kite Center API (e2e)', () => {
       const drivers = (await http.get(`${API}/drivers`).set(auth(admin))).body.drivers;
       expect(drivers.some((d: any) => d.id === me.id)).toBe(true);
 
-      // Order assigned to themselves: no driver pay, and no "new delivery" message to themselves.
+      // Order assigned to themselves: the vehicle's fare (shown apart from the delivery charge), and no
+      // "new delivery" message to themselves.
       const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
       const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
       await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
@@ -1415,7 +1416,7 @@ describe('GD Kite Center API (e2e)', () => {
       await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(200);
       await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: me.id }).expect(200);
       const assigned = (await http.get(`${API}/orders/${order.id}`).set(auth(admin))).body.order;
-      expect(assigned.driverFare).toBe(0);
+      expect(assigned.driverFare).toBeGreaterThan(0);
       const adminUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@gdkitecenter.in' } });
       await app.get(SmsService).drain();
       expect(await prisma.smsMessage.count({ where: { orderId: order.id, event: 'deliveryAssigned', userId: adminUser.id } })).toBe(0);

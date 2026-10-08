@@ -196,7 +196,11 @@ export class DriversService {
     return out;
   }
 
-  /** An admin starts delivering too (or changes their vehicle). Driver pay ₹0 unless changed later. */
+  /**
+   * An admin starts delivering too (or changes their vehicle). Paid at the vehicle's rate like any
+   * driver, so each order shows its delivery cost apart from the delivery charge (a custom fare can
+   * still be set on the driver).
+   */
   async enableSelf(admin: AuthUser, vehicleTypeId: string, vehicleNumber?: string) {
     const vehicle = await this.prisma.vehicleType.findUnique({ where: { id: vehicleTypeId } });
     if (!vehicle || !vehicle.isActive) throw new NotFoundException('Vehicle type not found.');
@@ -217,9 +221,6 @@ export class DriversService {
             vehicleTypeId: vehicle.id,
             serviceAreaId: area?.id ?? null,
             hub: area?.hubName ?? 'Hub',
-            // The owner delivering pays no driver fare: the delivery charge is all earnings.
-            customBaseFare: new Prisma.Decimal(0),
-            customPerKm: new Prisma.Decimal(0),
           },
           include: driverInclude,
         });
