@@ -278,6 +278,18 @@ describe('GD Kite Center API (e2e)', () => {
       expect(cats.body.categories.map((c: any) => c.slug)).toEqual(['fighterKites', 'designerKites', 'manjha', 'accessories']);
     });
 
+    it('publishes a price list without sign-in, with no cost prices', async () => {
+      const res = await http.get(`${API}/catalog/price-list`).expect(200);
+      expect(res.headers['cache-control']).toContain('max-age=300');
+      const list = res.body.products as any[];
+      expect(list.length).toBeGreaterThan(0);
+      expect(list.find((p) => p.name === 'Premium Fighter Kite (Medium)')).toMatchObject({ unit: expect.any(String), inStock: true });
+      for (const p of list) {
+        expect(Object.keys(p).sort()).toEqual(['category', 'inStock', 'minQty', 'name', 'price', 'unit']);
+        expect(typeof p.price).toBe('number');
+      }
+    });
+
     it('takes any quantity of in-stock products and prices them on the server', async () => {
       const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
       expect(kite).toMatchObject({ inStock: true, size: { name: 'Medium' }, displayName: 'Premium Fighter Kite (Medium)' });

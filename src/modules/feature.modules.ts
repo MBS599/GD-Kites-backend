@@ -9,6 +9,7 @@ import { PhoneOtpService } from './auth/phone-otp.service';
 import { CartController } from './cart/cart.controller';
 import { CartService } from './cart/cart.service';
 import { CategoriesController } from './catalog/categories.controller';
+import { PriceListController } from './catalog/price-list.controller';
 import { SizesController } from './catalog/sizes.controller';
 import { ProductsController } from './catalog/products.controller';
 import { ProductsService } from './catalog/products.service';
@@ -85,7 +86,7 @@ export class AddressesModule {}
 
 /** Categories, sizes, products and product image uploads. */
 @Module({
-  controllers: [CategoriesController, SizesController, ProductsController, UploadsController],
+  controllers: [CategoriesController, SizesController, ProductsController, PriceListController, UploadsController],
   providers: [ProductsService],
 })
 export class CatalogModule {}
