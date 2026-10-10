@@ -58,34 +58,34 @@ enum PaymentStatus {
 }
 
 model User {
-  id            String         @id @default(uuid())
+  id                  String         @id @default(uuid())
   /// Null for accounts created by mobile-number (OTP) sign-in until the customer adds one.
-  email         String?        @unique
+  email               String?        @unique
   /// The customer typed the email in themselves (not proven by Google). Google
   /// sign-in never links to such an account; the real owner gets their own.
-  emailUnverified Boolean      @default(false)
-  name          String
-  phone         String?
+  emailUnverified     Boolean        @default(false)
+  name                String
+  phone               String?
   /// Mobile number proven by OTP, normalised (919822011122). Used for OTP sign-in.
-  phoneVerified String?        @unique
-  businessName  String?
-  photoUrl      String?
+  phoneVerified       String?        @unique
+  businessName        String?
+  photoUrl            String?
   /// Last time the user opened their notifications: later order updates count as unread.
   notificationsSeenAt DateTime?
-  googleSub     String?        @unique
+  googleSub           String?        @unique
   /// Assigned server-side only. Public Google sign-up always creates CUSTOMER.
-  role          Role           @default(CUSTOMER)
-  isActive      Boolean        @default(true)
+  role                Role           @default(CUSTOMER)
+  isActive            Boolean        @default(true)
   /// Transactional SMS updates (order status, assignments). User can turn off.
-  smsEnabled    Boolean        @default(true)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  driverProfile DriverProfile?
-  addresses     Address[]
-  cart          Cart?
-  orders        Order[]        @relation("CustomerOrders")
-  refreshTokens RefreshToken[]
-  devices       DeviceToken[]
+  smsEnabled          Boolean        @default(true)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  driverProfile       DriverProfile?
+  addresses           Address[]
+  cart                Cart?
+  orders              Order[]        @relation("CustomerOrders")
+  refreshTokens       RefreshToken[]
+  devices             DeviceToken[]
 
   @@index([role])
 }
@@ -111,94 +111,106 @@ model RefreshToken {
 
 /// Single-row, admin-editable app-wide settings (id is always 1).
 model AppSettings {
-  id                 Int      @id @default(1)
+  id                    Int          @id @default(1)
   /// Upper bound for a service area's radius (the admin slider's max).
-  maxServiceRadiusKm Float    @default(100)
+  maxServiceRadiusKm    Float        @default(100)
   /// Delivery planning: orders join a group within this distance (km) of its first order.
-  dispatchRadiusKm   Float    @default(4)
+  dispatchRadiusKm      Float        @default(4)
   /// Delivery planning: most orders suggested for one driver.
-  dispatchMaxOrders  Int      @default(8)
+  dispatchMaxOrders     Int          @default(8)
   /// Online payment: GST % added to the delivery charge.
-  deliveryGstPercent Float    @default(18)
+  deliveryGstPercent    Float        @default(18)
   /// Online payment: Razorpay fee % passed to the customer (0 = the business absorbs it).
-  gatewayFeePercent  Float    @default(2)
+  gatewayFeePercent     Float        @default(2)
   /// Smallest cart subtotal (goods only, before delivery) a customer can order, in rupees.
-  minOrderValue      Decimal  @default(1000) @db.Decimal(10, 2)
+  minOrderValue         Decimal      @default(1000) @db.Decimal(10, 2)
   /// Business number linked to WhatsApp (QR scan), e.g. 919822011122. Shown to users as the shop's
   /// contact number; null while no phone is linked, and then no contact number is shown anywhere.
-  whatsappNumber     String?
+  whatsappNumber        String?
   /// Customer delivery charge = this vehicle type's baseFare + perKm × km from hub (the Tempo).
   deliveryVehicleTypeId String?
   deliveryVehicleType   VehicleType? @relation("DeliveryChargeVehicle", fields: [deliveryVehicleTypeId], references: [id], onDelete: SetNull)
   /// Force update: Android builds below this number must update before they can be used (0 = off).
-  androidMinBuild    Int      @default(0)
+  androidMinBuild       Int          @default(0)
   /// Shown on the update screens (e.g. what changed); null for the default text.
-  updateMessage      String?
-  updatedAt          DateTime @updatedAt
+  updateMessage         String?
+  updatedAt             DateTime     @updatedAt
 }
 
 /// Admin-managed vehicle category with its own driver fare:
 /// fare = baseFare + perKm × road km from hub.
 model VehicleType {
-  id        String          @id @default(uuid())
-  name      String          @unique
-  baseFare  Decimal         @db.Decimal(10, 2)
-  perKm     Decimal         @db.Decimal(10, 2)
+  id                String          @id @default(uuid())
+  name              String          @unique
+  baseFare          Decimal         @db.Decimal(10, 2)
+  perKm             Decimal         @db.Decimal(10, 2)
   /// Two-step rate: [perKm] for the first [tierKm] km, then [perKmAfter] for each km beyond.
   /// Both null = one rate for every km.
-  tierKm     Float?
-  perKmAfter Decimal?       @db.Decimal(10, 2)
-  sortOrder Int             @default(0)
-  isActive  Boolean         @default(true)
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  drivers   DriverProfile[]
+  tierKm            Float?
+  perKmAfter        Decimal?        @db.Decimal(10, 2)
+  sortOrder         Int             @default(0)
+  isActive          Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  drivers           DriverProfile[]
   /// Set when this type's rate is also the customer delivery charge.
-  deliveryChargeFor AppSettings[] @relation("DeliveryChargeVehicle")
+  deliveryChargeFor AppSettings[]   @relation("DeliveryChargeVehicle")
 }
 
 /// Admin-managed delivery geofence (circle) with its own dispatch hub.
 /// Customers can only save addresses / order inside an active area.
 model ServiceArea {
-  id                 String          @id @default(uuid())
-  name               String          @unique
-  city               String
-  centerLat          Float
-  centerLng          Float
-  radiusKm           Float
+  id        String          @id @default(uuid())
+  name      String          @unique
+  city      String
+  centerLat Float
+  centerLng Float
+  radiusKm  Float
   /// Dispatch hub: distance, delivery charge and driver fare are measured from here.
-  hubName            String
-  hubLat             Float
-  hubLng             Float
-  isActive           Boolean         @default(true)
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
-  addresses          Address[]
-  orders             Order[]
-  drivers            DriverProfile[]
+  hubName   String
+  hubLat    Float
+  hubLng    Float
+  isActive  Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  addresses Address[]
+  orders    Order[]
+  drivers   DriverProfile[]
 
   @@index([isActive])
 }
 
 model Address {
-  id            String       @id @default(uuid())
-  userId        String
-  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  serviceAreaId String?
-  serviceArea   ServiceArea? @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
-  label         String
-  area          String
-  line          String
-  city          String
-  pincode       String       @db.VarChar(6)
-  lat           Float
-  lng           Float
-  distanceKm    Float
-  contactName   String?
-  contactPhone  String?
-  isDeleted     Boolean      @default(false)
-  createdAt     DateTime     @default(now())
-  orders        Order[]
+  id             String       @id @default(uuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serviceAreaId  String?
+  serviceArea    ServiceArea? @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
+  label          String
+  area           String
+  line           String
+  city           String
+  pincode        String       @db.VarChar(6)
+  lat            Float
+  lng            Float
+  distanceKm     Float
+  contactName    String?
+  contactPhone   String?
+  houseNumber    String?
+  buildingName   String?
+  street         String?
+  landmark       String?
+  state          String?
+  country        String       @default("India")
+  alternatePhone String?
+  /// e.g. "Call before delivery".
+  instructions   String?
+  /// One per customer (partial unique index in the migration).
+  isDefault      Boolean      @default(false)
+  isDeleted      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @default(now()) @updatedAt
+  orders         Order[]
 
   @@index([userId, isDeleted])
 }
@@ -221,7 +233,7 @@ model Product {
   price       Decimal     @db.Decimal(10, 2)
   unit        String      @default("piece")
   /// What GD Kite Center pays per unit (admin only). Used for profit on the dashboard.
-  costPrice         Decimal?            @db.Decimal(10, 2)
+  costPrice   Decimal?    @db.Decimal(10, 2)
   /// Switched by the admin; customers can't add out-of-stock products (no stock counts are kept).
   inStock     Boolean     @default(true)
   /// Damaged goods sold cheaply: listed in their own "Damaged" section with a clear badge.
@@ -311,45 +323,48 @@ model CartItem {
 }
 
 model Order {
-  id              String               @id @default(uuid())
-  number          Int                  @unique @default(autoincrement())
-  customerId      String
-  customer        User                 @relation("CustomerOrders", fields: [customerId], references: [id])
-  addressId       String?
-  address         Address?             @relation(fields: [addressId], references: [id], onDelete: SetNull)
-  serviceAreaId   String?
-  serviceArea     ServiceArea?         @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
-  status          OrderStatus          @default(PENDING)
-  paymentMethod   PaymentMethod        @default(CASH_ON_DELIVERY)
-  subtotal        Decimal              @db.Decimal(12, 2)
-  deliveryCharge  Decimal              @db.Decimal(10, 2)
-  total           Decimal              @db.Decimal(12, 2)
+  id               String               @id @default(uuid())
+  number           Int                  @unique @default(autoincrement())
+  customerId       String
+  customer         User                 @relation("CustomerOrders", fields: [customerId], references: [id])
+  addressId        String?
+  address          Address?             @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  serviceAreaId    String?
+  serviceArea      ServiceArea?         @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
+  status           OrderStatus          @default(PENDING)
+  paymentMethod    PaymentMethod        @default(CASH_ON_DELIVERY)
+  subtotal         Decimal              @db.Decimal(12, 2)
+  deliveryCharge   Decimal              @db.Decimal(10, 2)
+  total            Decimal              @db.Decimal(12, 2)
   /// Online payment only: GST on the delivery charge and the Razorpay fee passed on (both in total).
-  deliveryTax     Decimal              @default(0) @db.Decimal(10, 2)
-  paymentFee      Decimal              @default(0) @db.Decimal(10, 2)
+  deliveryTax      Decimal              @default(0) @db.Decimal(10, 2)
+  paymentFee       Decimal              @default(0) @db.Decimal(10, 2)
   /// Paid online so far (the delivery charge); the rest is collected in cash on delivery.
-  paidOnline      Decimal              @default(0) @db.Decimal(12, 2)
+  paidOnline       Decimal              @default(0) @db.Decimal(12, 2)
   /// AWAITING_PAYMENT orders are cancelled (stock released) after this.
-  paymentDueBy    DateTime?
+  paymentDueBy     DateTime?
   // Delivery address snapshot — later edits to saved addresses never change an order.
-  addrLabel       String
-  addrArea        String
-  addrLine        String
-  addrCity        String
-  addrPincode     String
-  addrLat         Float
-  addrLng         Float
-  distanceKm      Float
-  contactName     String
-  contactPhone    String
-  rejectionReason String?
-  placedAt        DateTime             @default(now())
-  deliveredAt     DateTime?
-  updatedAt       DateTime             @updatedAt
-  items           OrderItem[]
-  history         OrderStatusHistory[]
-  delivery        Delivery?
-  payments        Payment[]
+  addrLabel        String
+  addrArea         String
+  addrLine         String
+  addrCity         String
+  addrPincode      String
+  addrLat          Float
+  addrLng          Float
+  distanceKm       Float
+  contactName      String
+  contactPhone     String
+  addrLandmark     String?
+  addrInstructions String?
+  altPhone         String?
+  rejectionReason  String?
+  placedAt         DateTime             @default(now())
+  deliveredAt      DateTime?
+  updatedAt        DateTime             @updatedAt
+  items            OrderItem[]
+  history          OrderStatusHistory[]
+  delivery         Delivery?
+  payments         Payment[]
 
   @@index([customerId, placedAt])
   @@index([status, placedAt])
@@ -358,17 +373,17 @@ model Order {
 }
 
 model OrderItem {
-  id          String  @id @default(uuid())
+  id          String   @id @default(uuid())
   orderId     String
-  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId   String
-  product     Product @relation(fields: [productId], references: [id])
+  product     Product  @relation(fields: [productId], references: [id])
   /// Snapshots at order time.
   productName String
   unit        String
   qty         Int
-  unitPrice   Decimal @db.Decimal(10, 2)
-  lineTotal   Decimal @db.Decimal(12, 2)
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  lineTotal   Decimal  @db.Decimal(12, 2)
   /// Cost per unit at order time (null if the product had no cost price), for profit.
   unitCost    Decimal? @db.Decimal(10, 2)
   /// Combo lines: what one combo contained at order time, e.g. "50 × Pona (Big), 2 × Manjha".

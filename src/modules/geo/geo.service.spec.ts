@@ -125,4 +125,80 @@ describe('GeoService', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('maps.googleapis.com');
     expect(place).toMatchObject({ label: 'Katraj Chowk, Katraj, Pune', pincode: '411046' });
   });
+
+  describe('Places search', () => {
+    it('reports search as off without a key and never calls Google', async () => {
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock as never;
+      const geo = new GeoService(config());
+      expect(geo.searchEnabled).toBe(false);
+      await expect(geo.autocomplete('katraj', 'session-1234')).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('sends India-only autocomplete with the session token and maps the suggestions', async () => {
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          suggestions: [
+            {
+              placePrediction: {
+                placeId: 'ChIJ-katraj',
+                text: { text: 'Katraj Chowk, Katraj, Pune' },
+                structuredFormat: { mainText: { text: 'Katraj Chowk' }, secondaryText: { text: 'Katraj, Pune, Maharashtra' } },
+              },
+            },
+            { queryPrediction: { text: { text: 'katraj dairy' } } },
+          ],
+        }),
+      });
+      global.fetch = fetchMock as never;
+      const list = await new GeoService(config('key-123')).autocomplete('katraj', 'session-1234', { lat: 18.45, lng: 73.86 });
+      expect(list).toEqual([{ placeId: 'ChIJ-katraj', main: 'Katraj Chowk', secondary: 'Katraj, Pune, Maharashtra' }]);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://places.googleapis.com/v1/places:autocomplete');
+      expect(init.headers['X-Goog-Api-Key']).toBe('key-123');
+      expect(JSON.parse(init.body)).toMatchObject({ input: 'katraj', sessionToken: 'session-1234', includedRegionCodes: ['in'] });
+    });
+
+    it('maps place details to a location and address parts', async () => {
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          id: 'ChIJ-shop',
+          displayName: { text: 'Laxmi Market' },
+          formattedAddress: '12, Satara Rd, Katraj, Pune, Maharashtra 411046, India',
+          location: { latitude: 18.4529, longitude: 73.8652 },
+          addressComponents: [
+            { longText: '12', types: ['street_number'] },
+            { longText: 'Satara Road', types: ['route'] },
+            { longText: 'Katraj', types: ['sublocality_level_1', 'sublocality'] },
+            { longText: 'Pune', types: ['locality'] },
+            { longText: 'Maharashtra', types: ['administrative_area_level_1'] },
+            { longText: '411046', types: ['postal_code'] },
+          ],
+        }),
+      });
+      global.fetch = fetchMock as never;
+      const place = await new GeoService(config('key-123')).details('ChIJ-shop', 'session-1234');
+      expect(place).toMatchObject({
+        lat: 18.4529,
+        lng: 73.8652,
+        houseNumber: '12',
+        building: 'Laxmi Market',
+        street: 'Satara Road',
+        area: 'Katraj',
+        city: 'Pune',
+        state: 'Maharashtra',
+        pincode: '411046',
+      });
+      expect(String(fetchMock.mock.calls[0][0])).toContain('sessionToken=session-1234');
+      expect(fetchMock.mock.calls[0][1].headers['X-Goog-FieldMask']).toContain('addressComponents');
+    });
+
+    it('turns a quota error into a friendly 503', async () => {
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 429, text: async () => 'quota' }) as never;
+      await expect(new GeoService(config('key-123')).autocomplete('pune', 'session-1234')).rejects.toThrow(/Too many searches/);
+    });
+  });
 });

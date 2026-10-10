@@ -233,6 +233,14 @@ export function productOut(p: ProductWithCategory, { cost = false }: { cost?: bo
  * `serviceable` is re-evaluated on every read: an address saved while an area
  * was active becomes unserviceable if the admin later deactivates or shrinks it.
  */
+/** "Shop 4, Laxmi Market, Satara Road, Katraj, near Hanuman Temple, Pune, Maharashtra 411046". */
+export function formattedAddress(a: Pick<Address, 'line' | 'area' | 'landmark' | 'city' | 'state' | 'pincode'>) {
+  const place = [a.state, a.pincode].filter(Boolean).join(' ');
+  return [a.line, a.area, a.landmark ? `near ${a.landmark}` : null, a.city, place || null]
+    .filter((p, i, arr): p is string => !!p && arr.indexOf(p) === i)
+    .join(', ');
+}
+
 export function addressOut(a: Address & { serviceArea?: ServiceArea | null }) {
   const area = a.serviceArea ?? null;
   return {
@@ -246,6 +254,18 @@ export function addressOut(a: Address & { serviceArea?: ServiceArea | null }) {
     distanceKm: a.distanceKm,
     contactName: a.contactName,
     contactPhone: a.contactPhone,
+    alternatePhone: a.alternatePhone,
+    houseNumber: a.houseNumber,
+    buildingName: a.buildingName,
+    street: a.street,
+    landmark: a.landmark,
+    state: a.state,
+    country: a.country,
+    instructions: a.instructions,
+    isDefault: a.isDefault,
+    /** Built from the customer-confirmed parts (Google content is never stored). */
+    formattedAddress: formattedAddress(a),
+    updatedAt: a.updatedAt.toISOString(),
     serviceArea: areaRef(area),
     serviceable: !!area && area.isActive && contains(area, a.lat, a.lng),
   };
@@ -337,6 +357,9 @@ export function orderOut(o: FullOrder, { driverLocation = false }: { driverLocat
       distanceKm: o.distanceKm,
       contactName: o.contactName,
       contactPhone: o.contactPhone,
+      landmark: o.addrLandmark,
+      instructions: o.addrInstructions,
+      alternatePhone: o.altPhone,
     },
     etaMinutes: etaMinutes(o.distanceKm),
     driver: activeDelivery

@@ -66,6 +66,7 @@ describe('GD Kite Center API (e2e)', () => {
           pincode: '411001',
           state: 'Maharashtra',
         }),
+        searchEnabled: false,
       })
       // Predictable one-time codes: login OTP 123456, delivery OTP 1234.
       .overrideProvider(OtpGenerator)
@@ -1146,6 +1147,13 @@ describe('GD Kite Center API (e2e)', () => {
       const res = await http.get(`${API}/geo/reverse?lat=18.4866&lng=73.8656`).set(auth(customer)).expect(200);
       expect(res.body.place).toMatchObject({ label: 'Marketyard, Mukund Nagar, Pune', pincode: '411001' });
     });
+
+    it('reports address search as off without a Google key', async () => {
+      expect((await http.get(`${API}/geo/config`).set(auth(customer)).expect(200)).body).toEqual({ search: false });
+      const res = await http.get(`${API}/geo/autocomplete?q=katraj&session=test-session-1`).set(auth(customer)).expect(200);
+      expect(res.body).toEqual({ enabled: false, suggestions: [] });
+      await http.get(`${API}/geo/autocomplete?q=k&session=bad`).set(auth(customer)).expect(400);
+    });
   });
 
   describe('admin management', () => {
@@ -1521,6 +1529,76 @@ describe('GD Kite Center API (e2e)', () => {
       const user = (await http.post(`${API}/users/me/notifications-seen`).set(auth(customer)).expect(200)).body.user;
       expect(new Date(user.notificationsSeenAt).getTime()).toBeGreaterThanOrEqual(before - 1000);
       expect((await http.get(`${API}/auth/me`).set(auth(customer))).body.user.notificationsSeenAt).toBe(user.notificationsSeenAt);
+    });
+  });
+
+  describe('address book', () => {
+    const pune = { lat: 18.4529, lng: 73.8652 };
+    const body = {
+      label: 'Godown',
+      contactName: 'Mayur Sutar',
+      contactPhone: '9822011122',
+      alternatePhone: '+91 98220 33344',
+      houseNumber: 'Shop 4',
+      buildingName: 'Laxmi Market',
+      street: 'Satara Road',
+      area: 'Katraj',
+      landmark: 'Hanuman Temple',
+      city: 'Pune',
+      state: 'Maharashtra',
+      pincode: '411046',
+      instructions: 'Call before delivery',
+      ...pune,
+    };
+
+    it('saves structured details, landmark, alternate mobile and instructions', async () => {
+      const a = (await http.post(`${API}/addresses`).set(auth(customer)).send(body).expect(201)).body.address;
+      expect(a).toMatchObject({
+        line: 'Shop 4, Laxmi Market, Satara Road',
+        contactPhone: '+91 98220 11122',
+        alternatePhone: '+91 98220 33344',
+        landmark: 'Hanuman Temple',
+        state: 'Maharashtra',
+        country: 'India',
+        isDefault: false,
+        formattedAddress: 'Shop 4, Laxmi Market, Satara Road, Katraj, near Hanuman Temple, Pune, Maharashtra 411046',
+      });
+      await http.delete(`${API}/addresses/${a.id}`).set(auth(customer)).expect(204);
+    });
+
+    it('validates mobiles and PIN; the alternate must differ from the primary', async () => {
+      await http.post(`${API}/addresses`).set(auth(customer)).send({ ...body, contactPhone: '12345' }).expect(400);
+      await http.post(`${API}/addresses`).set(auth(customer)).send({ ...body, pincode: '012345' }).expect(400);
+      const same = await http.post(`${API}/addresses`).set(auth(customer)).send({ ...body, alternatePhone: '+91 9822011122' }).expect(400);
+      expect(same.body.error.message).toMatch(/different/);
+    });
+
+    it('edits an address, moves the default and keeps one default per customer', async () => {
+      const before = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      const original = before.find((a: any) => a.isDefault);
+      expect(before.filter((a: any) => a.isDefault)).toHaveLength(1);
+
+      const created = (await http.post(`${API}/addresses`).set(auth(customer)).send({ ...body, isDefault: true }).expect(201)).body.address;
+      expect(created.isDefault).toBe(true);
+      let list = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      expect(list[0].id).toBe(created.id);
+      expect(list.filter((a: any) => a.isDefault)).toHaveLength(1);
+
+      const edited = (
+        await http.patch(`${API}/addresses/${created.id}`).set(auth(customer)).send({ landmark: 'Bharati College', alternatePhone: '' }).expect(200)
+      ).body.address;
+      expect(edited).toMatchObject({ landmark: 'Bharati College', alternatePhone: null, street: 'Satara Road' });
+      // Moving the pin outside every area is refused.
+      await http.patch(`${API}/addresses/${created.id}`).set(auth(customer)).send({ lat: 21.1458, lng: 79.0882 }).expect(422);
+      await http.patch(`${API}/addresses/${created.id}`).set(auth(customer)).send({ lat: 18.46 }).expect(400);
+
+      // Another customer can't touch it.
+      await http.patch(`${API}/addresses/${created.id}`).set(auth(admin)).send({ landmark: 'x' }).expect(403);
+
+      await http.post(`${API}/addresses/${original.id}/default`).set(auth(customer)).expect(201);
+      list = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      expect(list[0].id).toBe(original.id);
+      await http.delete(`${API}/addresses/${created.id}`).set(auth(customer)).expect(204);
     });
   });
 
