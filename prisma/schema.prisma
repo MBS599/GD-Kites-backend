@@ -144,6 +144,10 @@ model VehicleType {
   name      String          @unique
   baseFare  Decimal         @db.Decimal(10, 2)
   perKm     Decimal         @db.Decimal(10, 2)
+  /// Two-step rate: [perKm] for the first [tierKm] km, then [perKmAfter] for each km beyond.
+  /// Both null = one rate for every km.
+  tierKm     Float?
+  perKmAfter Decimal?       @db.Decimal(10, 2)
   sortOrder Int             @default(0)
   isActive  Boolean         @default(true)
   createdAt DateTime        @default(now())

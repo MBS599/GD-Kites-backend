@@ -29,7 +29,7 @@ import { UploadsController } from './uploads/uploads.controller';
 import { ServiceAreasController } from './service-areas/service-areas.controller';
 import { ServiceAreasService } from './service-areas/service-areas.service';
 import { AppVersionController, SettingsController, SettingsService } from './settings/settings.controller';
-import { PaymentsController, RazorpayWebhookController } from './payments/payments.controller';
+import { MyPaymentsController, PaymentsAdminController, PaymentsController, RazorpayWebhookController } from './payments/payments.controller';
 import { PaymentsService } from './payments/payments.service';
 import { RazorpayClient } from './payments/razorpay.client';
 import { UsersController } from './users/users.controller';
@@ -96,7 +96,7 @@ export class CartModule {}
 
 /** Orders, checkout and tracking. */
 @Module({
-  controllers: [OrdersController, DispatchController, PaymentsController, RazorpayWebhookController],
+  controllers: [OrdersController, DispatchController, PaymentsController, PaymentsAdminController, MyPaymentsController, RazorpayWebhookController],
   providers: [OrdersService, DispatchService, RoutingService, PaymentsService, RazorpayClient],
 })
 export class OrdersModule {}

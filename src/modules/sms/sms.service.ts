@@ -203,8 +203,11 @@ export class SmsService {
     this.later(async () => {
       const customer = await this.prisma.user.findUnique({ where: { id: o.customerId } });
       if (!customer?.smsEnabled) return;
+      // Greet the person who ordered by their own first name ("Hi Mayur"), not the shop
+      // name on the delivery address.
+      const greeted = GREETS_BY_NAME.has(event) && customer.name.trim() ? [firstName(customer.name), ...vars.slice(1)] : vars;
       // The delivery contact number given at checkout, else the account phone.
-      this.enqueue({ event, to: o.contactPhone || customer.phone || '', vars, userId: customer.id, orderId: o.id });
+      this.enqueue({ event, to: o.contactPhone || customer.phone || '', vars: greeted, userId: customer.id, orderId: o.id });
     });
   }
 
@@ -316,6 +319,16 @@ export class SmsService {
 const money = (v: { toString(): string } | number) => Math.round(Number(v.toString())).toLocaleString('en-IN');
 
 const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
+
+/** Customer messages whose first variable is the greeting name ("Hi {name}"). */
+const GREETS_BY_NAME = new Set<SmsEvent>([
+  'orderPlaced',
+  'orderConfirmed',
+  'driverAssigned',
+  'outForDelivery',
+  'orderDelivered',
+  'orderCancelled',
+]);
 
 /** "100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord, +3 more" for messages. */
 export function itemsLine(items: Pick<FullOrder['items'][number], 'qty' | 'productName'>[], shown = 4) {

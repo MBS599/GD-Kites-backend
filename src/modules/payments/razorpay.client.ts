@@ -79,6 +79,11 @@ export class RazorpayClient {
     return this.call('POST', `/payments/${paymentId}/refund`, { amount: amountPaise, speed: 'normal', notes });
   }
 
+  /** Current state of a refund (admin "Check status" when the webhook is late). */
+  fetchRefund(paymentId: string, refundId: string): Promise<RzpRefund> {
+    return this.call('GET', `/payments/${paymentId}/refunds/${refundId}`);
+  }
+
   private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
     const auth = Buffer.from(`${this.keyId}:${this.config.get('RAZORPAY_KEY_SECRET')}`).toString('base64');
     let res: Response;

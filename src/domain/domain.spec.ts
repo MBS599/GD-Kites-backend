@@ -39,6 +39,12 @@ describe('pricing', () => {
   it('driver fare = driver base + per km × distance, rounded to the rupee', () => {
     expect(driverFareFor(8.4, { base: 40, perKm: 13 })).toBe(149); // bike: 149.2
     expect(driverFareFor(8.4, { base: 150, perKm: 25 })).toBe(360); // tempo
+    // Two-step rate: Rs 50 + 10/km for the first 5 km, 8/km after.
+    const tempo = { base: 50, perKm: 10, tierKm: 5, perKmAfter: 8 };
+    expect(deliveryChargeFor(3, tempo)).toBe(80);
+    expect(deliveryChargeFor(5, tempo)).toBe(100);
+    expect(deliveryChargeFor(8, tempo)).toBe(124);
+    expect(deliveryChargeFor(0, tempo)).toBe(50);
   });
 
   it('applies wholesale slab only above the slab quantity', () => {

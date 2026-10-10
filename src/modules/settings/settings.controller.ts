@@ -80,7 +80,7 @@ const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
   deliveryGstPercent: s.deliveryGstPercent,
   gatewayFeePercent: s.gatewayFeePercent,
   minOrderValue: s.minOrderValue.toNumber(),
-  /** Customer delivery charge = this vehicle's baseFare + perKm × km (null = default ₹150 + ₹25/km). */
+  /** Customer delivery charge = this vehicle's baseFare + perKm × km (null = default ₹50 + ₹10/km for 5 km, then ₹8/km). */
   deliveryVehicleType: s.deliveryVehicleType ? vehicleTypeOut(s.deliveryVehicleType) : null,
   androidMinBuild: s.androidMinBuild,
   updateMessage: s.updateMessage,

@@ -92,7 +92,16 @@ export function sizeOut(s: Size) {
 export const driverInclude = { user: true, serviceArea: true, vehicleType: true } as const;
 
 export function vehicleTypeOut(v: VehicleType) {
-  return { id: v.id, name: v.name, baseFare: m(v.baseFare), perKm: m(v.perKm), isActive: v.isActive };
+  return {
+    id: v.id,
+    name: v.name,
+    baseFare: m(v.baseFare),
+    perKm: m(v.perKm),
+    /** Two-step rate: perKm for the first tierKm km, then perKmAfter (both null = one rate). */
+    tierKm: v.tierKm,
+    perKmAfter: v.perKmAfter == null ? null : m(v.perKmAfter),
+    isActive: v.isActive,
+  };
 }
 export const orderInclude = {
   items: true,
@@ -261,7 +270,13 @@ export function driverOut(d: DriverWithUser, counts?: { activeDeliveries?: numbe
     /** The rate actually used for this driver's fares. */
     fare: (() => {
       const { tariff, source } = driverTariffOf(d);
-      return { baseFare: tariff.base, perKm: tariff.perKm, source };
+      return {
+        baseFare: tariff.base,
+        perKm: tariff.perKm,
+        tierKm: tariff.tierKm ?? null,
+        perKmAfter: tariff.perKmAfter ?? null,
+        source,
+      };
     })(),
     hub: d.serviceArea?.hubName ?? d.hub,
     serviceArea: areaRef(d.serviceArea),

@@ -226,27 +226,144 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     const paid = await this.prisma.payment.findMany({ where: { orderId, status: 'PAID' } });
     let total = 0;
     for (const p of paid) {
-      const claimed = await this.prisma.payment.updateMany({ where: { id: p.id, status: 'PAID' }, data: { status: 'REFUND_PENDING' } });
-      if (claimed.count === 0 || !p.providerPaymentId) continue;
-      total += p.amount.toNumber();
-      try {
-        const r = await this.rzp.refund(p.providerPaymentId, paise(p.amount), { orderId, reason: reason.slice(0, 200) });
-        await this.prisma.payment.update({
-          where: { id: p.id },
-          data: {
-            refundId: r.id,
-            status: r.status === 'processed' ? 'REFUNDED' : r.status === 'failed' ? 'REFUND_FAILED' : 'REFUND_PENDING',
-            refundedAt: r.status === 'processed' ? new Date() : null,
-          },
-        });
-      } catch (e) {
-        const why = e instanceof RazorpayError ? e.reason : (e as Error).message;
-        this.log.error(`Refund of ${p.providerPaymentId} failed: ${why}`);
-        await this.prisma.payment.update({ where: { id: p.id }, data: { status: 'REFUND_FAILED', error: why } });
-      }
+      if (await this.refundOne(p, 'PAID', reason)) total += p.amount.toNumber();
     }
     if (total > 0) await this.prisma.order.update({ where: { id: orderId }, data: { paidOnline: { decrement: total } } });
     return total;
+  }
+
+  /**
+   * Asks Razorpay to refund one payment that is in state [from] (PAID, or REFUND_FAILED for a
+   * retry). Claims it first, so two clicks never refund twice. Never throws for Razorpay
+   * errors: they are recorded as REFUND_FAILED. False when the payment was not in [from].
+   */
+  private async refundOne(p: Payment, from: 'PAID' | 'REFUND_FAILED', reason: string): Promise<boolean> {
+    const claimed = await this.prisma.payment.updateMany({
+      where: { id: p.id, status: from },
+      data: { status: 'REFUND_PENDING', error: null },
+    });
+    if (claimed.count === 0 || !p.providerPaymentId) return false;
+    try {
+      const r = await this.rzp.refund(p.providerPaymentId, paise(p.amount), { orderId: p.orderId, reason: reason.slice(0, 200) });
+      await this.prisma.payment.update({
+        where: { id: p.id },
+        data: {
+          refundId: r.id,
+          status: r.status === 'processed' ? 'REFUNDED' : r.status === 'failed' ? 'REFUND_FAILED' : 'REFUND_PENDING',
+          refundedAt: r.status === 'processed' ? new Date() : null,
+        },
+      });
+    } catch (e) {
+      const why = e instanceof RazorpayError ? e.reason : (e as Error).message;
+      this.log.error(`Refund of ${p.providerPaymentId} failed: ${why}`);
+      await this.prisma.payment.update({ where: { id: p.id }, data: { status: 'REFUND_FAILED', error: why.slice(0, 300) } });
+    }
+    return true;
+  }
+
+  /** A customer's own online payments and refunds, newest first. */
+  async customerList(customerId: string, cursor?: string, limit = 20) {
+    const rows = await this.prisma.payment.findMany({
+      where: { status: { notIn: ['CREATED'] }, order: { customerId } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      include: { order: { select: { number: true, contactName: true, contactPhone: true, status: true } } },
+    });
+    const more = rows.length > limit;
+    const items = more ? rows.slice(0, limit) : rows;
+    return { payments: items.map(adminPaymentOut), nextCursor: more ? items[items.length - 1].id : null };
+  }
+
+  // ------------------------------------------------------------ admin
+
+  /** Admin list: newest first; filter by status or order. With totals per status. */
+  async adminList(q: { status?: Payment['status']; orderId?: string; cursor?: string; limit?: number }) {
+    const where: Prisma.PaymentWhereInput = {
+      ...(q.status ? { status: q.status } : { status: { not: 'CREATED' } }),
+      ...(q.orderId ? { orderId: q.orderId } : {}),
+    };
+    const limit = q.limit ?? 30;
+    const rows = await this.prisma.payment.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
+      include: { order: { select: { number: true, contactName: true, contactPhone: true, status: true } } },
+    });
+    const more = rows.length > limit;
+    const items = more ? rows.slice(0, limit) : rows;
+    const groups = await this.prisma.payment.groupBy({
+      by: ['status'],
+      where: q.orderId ? { orderId: q.orderId } : {},
+      _sum: { amount: true },
+      _count: { _all: true },
+    });
+    const sum = (...s: Payment['status'][]) =>
+      groups.filter((g) => s.includes(g.status)).reduce((t, g) => t + (g._sum.amount?.toNumber() ?? 0), 0);
+    const count = (s: Payment['status']) => groups.find((g) => g.status === s)?._count._all ?? 0;
+    return {
+      payments: items.map(adminPaymentOut),
+      nextCursor: more ? items[items.length - 1].id : null,
+      summary: {
+        /** Everything customers paid online (including what was later refunded). */
+        collected: sum('PAID', 'REFUND_PENDING', 'REFUNDED', 'REFUND_FAILED'),
+        /** Still held: paid and not refunded. */
+        kept: sum('PAID'),
+        refunded: sum('REFUNDED'),
+        refundPending: sum('REFUND_PENDING'),
+        refundFailed: sum('REFUND_FAILED'),
+        counts: {
+          paid: count('PAID'),
+          refundPending: count('REFUND_PENDING'),
+          refunded: count('REFUNDED'),
+          refundFailed: count('REFUND_FAILED'),
+          failed: count('FAILED'),
+        },
+      },
+    };
+  }
+
+  private async adminOne(id: string) {
+    const p = await this.prisma.payment.findUnique({
+      where: { id },
+      include: { order: { select: { number: true, contactName: true, contactPhone: true, status: true } } },
+    });
+    if (!p) throw new NotFoundException('Payment not found.');
+    return p;
+  }
+
+  /** Admin: refund a paid payment, or retry a refund that failed. */
+  async adminRefund(id: string, reason: string) {
+    const p = await this.adminOne(id);
+    if (p.status === 'PAID') {
+      if (await this.refundOne(p, 'PAID', reason)) {
+        await this.prisma.order.update({ where: { id: p.orderId }, data: { paidOnline: { decrement: p.amount } } });
+      }
+    } else if (p.status === 'REFUND_FAILED') {
+      // Its amount already left paidOnline when the first attempt was made.
+      await this.refundOne(p, 'REFUND_FAILED', reason);
+    } else {
+      throw new ConflictException(
+        p.status === 'REFUNDED' ? 'This payment is already refunded.' : p.status === 'REFUND_PENDING' ? 'A refund is already in progress.' : 'Only paid payments can be refunded.',
+      );
+    }
+    const order = await this.prisma.order.findUniqueOrThrow({ where: { id: p.orderId }, include: orderInclude });
+    this.realtime.orderUpdated(order);
+    return adminPaymentOut(await this.adminOne(id));
+  }
+
+  /** Admin: ask Razorpay how a refund is doing (when the webhook is late or missed). */
+  async adminSync(id: string) {
+    const p = await this.adminOne(id);
+    if (!p.refundId || !p.providerPaymentId) throw new BadRequestException('This payment has no refund to check.');
+    const r = await this.rzp.fetchRefund(p.providerPaymentId, p.refundId);
+    const status = r.status === 'processed' ? 'REFUNDED' : r.status === 'failed' ? 'REFUND_FAILED' : 'REFUND_PENDING';
+    await this.prisma.payment.update({
+      where: { id },
+      data: { status, refundedAt: status === 'REFUNDED' ? (p.refundedAt ?? new Date()) : null },
+    });
+    return adminPaymentOut(await this.adminOne(id));
   }
 
   /**
@@ -293,4 +410,30 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     }
     return cancelled;
   }
+}
+
+type AdminPaymentRow = Payment & { order: { number: number; contactName: string; contactPhone: string; status: string } };
+
+/** A payment as the admin sees it: amounts, Razorpay ids, the order and its customer. */
+function adminPaymentOut(p: AdminPaymentRow) {
+  const camel = (s: string) => s.toLowerCase().replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+  return {
+    id: p.id,
+    orderId: p.orderId,
+    orderCode: orderCode(p.order.number),
+    orderStatus: camel(p.order.status),
+    customerName: p.order.contactName,
+    customerPhone: p.order.contactPhone,
+    amount: p.amount.toNumber(),
+    currency: p.currency,
+    status: camel(p.status),
+    method: p.method,
+    paymentId: p.providerPaymentId,
+    razorpayOrderId: p.providerOrderId,
+    refundId: p.refundId,
+    error: p.error,
+    createdAt: p.createdAt.toISOString(),
+    paidAt: p.paidAt?.toISOString() ?? null,
+    refundedAt: p.refundedAt?.toISOString() ?? null,
+  };
 }

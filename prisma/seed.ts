@@ -176,7 +176,9 @@ async function main() {
   // Vehicle categories: the driver fare depends on the vehicle (or a custom per-driver rate).
   const bike = await prisma.vehicleType.create({ data: { name: 'Bike', baseFare: D(40), perKm: D(13), sortOrder: 0 } });
   const auto = await prisma.vehicleType.create({ data: { name: 'Auto rickshaw', baseFare: D(70), perKm: D(18), sortOrder: 1 } });
-  const tempo = await prisma.vehicleType.create({ data: { name: 'Tempo', baseFare: D(150), perKm: D(25), sortOrder: 2 } });
+  const tempo = await prisma.vehicleType.create({
+    data: { name: 'Tempo', baseFare: D(50), perKm: D(10), tierKm: 5, perKmAfter: D(8), sortOrder: 2 },
+  });
   // Customer delivery charge = the Tempo rate (most deliveries go by tempo).
   await prisma.appSettings.update({ where: { id: 1 }, data: { deliveryVehicleTypeId: tempo.id } });
 

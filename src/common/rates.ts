@@ -2,15 +2,26 @@ import type { DriverProfile, Prisma, VehicleType } from '@prisma/client';
 import { DEFAULT_DELIVERY_TARIFF, DEFAULT_DRIVER_TARIFF, type Tariff } from '../domain/pricing';
 
 type DriverRateFields = Pick<DriverProfile, 'customBaseFare' | 'customPerKm'> & {
-  vehicleType?: Pick<VehicleType, 'baseFare' | 'perKm'> | null;
+  vehicleType?: Pick<VehicleType, 'baseFare' | 'perKm' | 'tierKm' | 'perKmAfter'> | null;
 };
 
 const n = (d: Prisma.Decimal) => d.toNumber();
 
+/** A vehicle type's tariff, including its second per-km rate when set. */
+export function vehicleTariff(v: Pick<VehicleType, 'baseFare' | 'perKm' | 'tierKm' | 'perKmAfter'>): Tariff {
+  return {
+    base: n(v.baseFare),
+    perKm: n(v.perKm),
+    ...(v.tierKm != null && v.perKmAfter != null ? { tierKm: v.tierKm, perKmAfter: n(v.perKmAfter) } : {}),
+  };
+}
+
 /** Customer delivery tariff: the delivery vehicle's rates (the Tempo), set in admin settings. */
-export function deliveryTariffOf(vehicle: Pick<VehicleType, 'baseFare' | 'perKm'> | null | undefined): Tariff {
+export function deliveryTariffOf(
+  vehicle: Pick<VehicleType, 'baseFare' | 'perKm' | 'tierKm' | 'perKmAfter'> | null | undefined,
+): Tariff {
   if (!vehicle) return DEFAULT_DELIVERY_TARIFF;
-  return { base: n(vehicle.baseFare), perKm: n(vehicle.perKm) };
+  return vehicleTariff(vehicle);
 }
 
 export type DriverTariffSource = 'custom' | 'vehicle' | 'default';
@@ -24,7 +35,7 @@ export function driverTariffOf(driver: DriverRateFields): { tariff: Tariff; sour
     return { tariff: { base: n(driver.customBaseFare), perKm: n(driver.customPerKm) }, source: 'custom' };
   }
   if (driver.vehicleType) {
-    return { tariff: { base: n(driver.vehicleType.baseFare), perKm: n(driver.vehicleType.perKm) }, source: 'vehicle' };
+    return { tariff: vehicleTariff(driver.vehicleType), source: 'vehicle' };
   }
   return { tariff: DEFAULT_DRIVER_TARIFF, source: 'default' };
 }

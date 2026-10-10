@@ -876,6 +876,52 @@ describe('GD Kite Center API (e2e)', () => {
       await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
     });
 
+    it('admin sees payments and refunds; refunds, retries a failed refund and checks its status', async () => {
+      const payWithWebhook = async (payId: string) => {
+        const { order, checkout } = await placeUnpaid();
+        rzpPayments.set(payId, { id: payId, order_id: checkout.orderId, amount: checkout.amount, currency: 'INR', status: 'captured', method: 'upi' });
+        const event = JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: rzpPayments.get(payId) } } });
+        await http.post(`${API}/webhooks/razorpay`).set('Content-Type', 'application/json').set('X-Razorpay-Signature', sign('rzp-webhook-secret', event)).send(event).expect(200);
+        return { order, checkout };
+      };
+      // Only admins.
+      await http.get(`${API}/payments`).set(auth(customer)).expect(403);
+
+      const { order } = await payWithWebhook('pay_E2E10');
+      const list = (await http.get(`${API}/payments?orderId=${order.id}`).set(auth(admin)).expect(200)).body;
+      expect(list.payments).toHaveLength(1);
+      const pay = list.payments[0];
+      expect(pay).toMatchObject({ status: 'paid', paymentId: 'pay_E2E10', method: 'upi', orderCode: order.code, orderStatus: 'pending' });
+      expect(list.summary).toMatchObject({ kept: pay.amount, counts: { paid: 1 } });
+      const all = (await http.get(`${API}/payments?status=paid&limit=5`).set(auth(admin)).expect(200)).body;
+      expect(all.payments.every((p: any) => p.status === 'paid')).toBe(true);
+
+      // A refund that fails at the bank is recorded, then retried successfully.
+      (rzp.refund as jest.Mock).mockRejectedValueOnce(new Error('Bank is down'));
+      const failed = (await http.post(`${API}/payments/${pay.id}/refund`).set(auth(admin)).send({ reason: 'Customer asked' }).expect(200)).body.payment;
+      expect(failed).toMatchObject({ status: 'refundFailed', error: 'Bank is down' });
+      expect((await http.get(`${API}/orders/${order.id}`).set(auth(admin))).body.order.paidOnline).toBe(0);
+      const retried = (await http.post(`${API}/payments/${pay.id}/refund`).set(auth(admin)).send({}).expect(200)).body.payment;
+      expect(retried.status).toBe('refunded');
+      expect(retried.refundId).toMatch(/^rfnd_/);
+      await http.post(`${API}/payments/${pay.id}/refund`).set(auth(admin)).send({}).expect(409);
+
+      // Check status with Razorpay (e.g. the refund webhook was missed).
+      const fetchRefund = jest.spyOn(rzp, 'fetchRefund').mockResolvedValue({ id: retried.refundId, status: 'processed' });
+      const synced = (await http.post(`${API}/payments/${pay.id}/sync`).set(auth(admin)).expect(200)).body.payment;
+      expect(synced.status).toBe('refunded');
+      expect(fetchRefund).toHaveBeenCalledWith('pay_E2E10', retried.refundId);
+      fetchRefund.mockRestore();
+      await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
+
+      // The customer sees their own payments (not other customers'); admins use /payments.
+      const mine = (await http.get(`${API}/my/payments`).set(auth(customer)).expect(200)).body.payments;
+      expect(mine.find((p: any) => p.id === pay.id)).toMatchObject({ status: 'refunded', orderCode: order.code });
+      const other = await login('shreeganesh.traders@gmail.com');
+      expect((await http.get(`${API}/my/payments`).set(auth(other)).expect(200)).body.payments.some((p: any) => p.id === pay.id)).toBe(false);
+      await http.get(`${API}/my/payments`).set(auth(admin)).expect(403);
+    });
+
     it('unpaid orders are cancelled after the time limit', async () => {
       const { order } = await placeUnpaid();
       await prisma.order.update({ where: { id: order.id }, data: { paymentDueBy: new Date(Date.now() - 1000) } });
@@ -977,12 +1023,13 @@ describe('GD Kite Center API (e2e)', () => {
     });
 
     it('delivery charge = the Tempo rate (settings); driver fare = the assigned driver’s vehicle/custom rates', async () => {
-      // The delivery vehicle (Tempo, ₹150 + ₹25/km) sets the customer delivery charge.
+      // The delivery vehicle (Tempo: ₹50 + ₹10/km for 5 km, then ₹8/km) sets the customer delivery charge.
       const settings = (await http.get(`${API}/settings`).set(auth(admin)).expect(200)).body.settings;
-      expect(settings.deliveryVehicleType).toMatchObject({ name: 'Tempo', baseFare: 150, perKm: 25 });
+      expect(settings.deliveryVehicleType).toMatchObject({ name: 'Tempo', baseFare: 50, perKm: 10, tierKm: 5, perKmAfter: 8 });
       const tempoId = settings.deliveryVehicleType.id;
       let q = (await http.get(`${API}/addresses/quote?lat=18.4529&lng=73.8652`).set(auth(customer)).expect(200)).body;
-      expect(q.deliveryCharge).toBe(Math.round(150 + 25 * q.distanceKm));
+      const km = q.distanceKm;
+      expect(q.deliveryCharge).toBe(Math.round(km <= 5 ? 50 + 10 * km : 50 + 50 + 8 * (km - 5)));
 
       // Editing the Tempo rate changes the charge; areas have no delivery rates any more.
       await http.patch(`${API}/vehicle-types/${tempoId}`).set(auth(admin)).send({ baseFare: 100, perKm: 10 }).expect(200);
@@ -1018,7 +1065,8 @@ describe('GD Kite Center API (e2e)', () => {
       expect(bikeFare).toBe(Math.round(40 + 13 * order.address.distanceKm));
 
       // Changing rates later never rewrites placed orders.
-      await http.patch(`${API}/vehicle-types/${tempoId}`).set(auth(admin)).send({ baseFare: 150, perKm: 25 }).expect(200);
+      await http.patch(`${API}/vehicle-types/${tempoId}`).set(auth(admin)).send({ baseFare: 50, perKm: 10, tierKm: 5, perKmAfter: 8 }).expect(200);
+      await http.patch(`${API}/vehicle-types/${tempoId}`).set(auth(admin)).send({ tierKm: 5 }).expect(400);
       const types = (await http.get(`${API}/vehicle-types`).set(auth(admin)).expect(200)).body.vehicleTypes;
       const bikeType = types.find((t: any) => t.name === 'Bike');
       await http.patch(`${API}/vehicle-types/${bikeType.id}`).set(auth(admin)).send({ perKm: 99 }).expect(200);
@@ -1077,7 +1125,7 @@ describe('GD Kite Center API (e2e)', () => {
       const id = driver.user.driverId;
       await http.patch(`${API}/drivers/${id}`).set(auth(admin)).send({ customBaseFare: 55 }).expect(400); // needs both
       const custom = (await http.patch(`${API}/drivers/${id}`).set(auth(admin)).send({ customBaseFare: 55, customPerKm: 11.5 }).expect(200)).body.driver;
-      expect(custom.fare).toEqual({ baseFare: 55, perKm: 11.5, source: 'custom' });
+      expect(custom.fare).toEqual({ baseFare: 55, perKm: 11.5, tierKm: null, perKmAfter: null, source: 'custom' });
       const cleared = (await http.patch(`${API}/drivers/${id}`).set(auth(admin)).send({ customBaseFare: null, customPerKm: null }).expect(200)).body.driver;
       expect(cleared.fare).toMatchObject({ baseFare: 40, perKm: 13, source: 'vehicle' });
       expect(cleared.vehicleType.name).toBe('Bike');
@@ -1086,7 +1134,7 @@ describe('GD Kite Center API (e2e)', () => {
     it('amit (external) uses his negotiated rate', async () => {
       const drivers = (await http.get(`${API}/drivers`).set(auth(admin))).body.drivers;
       const amit = drivers.find((d: any) => d.name === 'Amit Jadhav');
-      expect(amit.fare).toEqual({ baseFare: 60, perKm: 16, source: 'custom' });
+      expect(amit.fare).toEqual({ baseFare: 60, perKm: 16, tierKm: null, perKmAfter: null, source: 'custom' });
       expect(amit.vehicleType.name).toBe('Auto rickshaw');
     });
   });
