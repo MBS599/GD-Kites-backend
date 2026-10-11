@@ -10,10 +10,13 @@ import { driverTariffOf } from '../../common/rates';
 import { RealtimeService } from '../realtime/realtime.service';
 import { SmsService } from '../sms/sms.service';
 import { OtpGenerator } from '../sms/otp';
-import { DELIVERY_OTP_DIGITS, DELIVERY_OTP_MAX_ATTEMPTS } from '../deliveries/deliveries.service';
+import {
+  DELIVERY_OTP_DIGITS,
+  DELIVERY_OTP_MAX_ATTEMPTS,
+  DELIVERY_OTP_MAX_SENDS,
+  DELIVERY_OTP_RESEND_MS,
+} from '../deliveries/deliveries.service';
 
-const DELIVERY_OTP_RESEND_MS = 60_000;
-const DELIVERY_OTP_MAX_SENDS = 4;
 import { ServiceAreasService } from '../service-areas/service-areas.service';
 import { assertTransition, moveOrder, refreshDriverAvailability } from './order-workflow';
 import { PaymentsService, type CheckoutSession } from '../payments/payments.service';

@@ -1,3 +1,4 @@
+import { Throttle } from '@nestjs/throttler';
 import {
   BadRequestException,
   Body,
@@ -81,6 +82,14 @@ export class DeliveriesController {
   ) {
     if (!file) throw new BadRequestException('No file was uploaded.');
     return this.deliveries.addProof(driverIdOf(user), orderId, publicUrl(this.config.get('PUBLIC_BASE_URL'), file.filename));
+  }
+
+  /** Send the customer their delivery code again (the driver never sees it). */
+  @Post(':orderId/otp/resend')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  resendOtp(@CurrentUser() user: AuthUser, @Param('orderId', ParseUUIDPipe) orderId: string) {
+    return this.deliveries.resendOtp(driverIdOf(user), orderId);
   }
 
   /** Marks delivered. Requires both confirmations, at least one proof photo and the customer's delivery OTP. */

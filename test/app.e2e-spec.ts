@@ -576,6 +576,13 @@ describe('GD Kite Center API (e2e)', () => {
       // Resend too soon.
       await http.post(`${API}/orders/${order.id}/delivery-otp/resend`).set(auth(customer)).expect(429);
       await http.post(`${API}/orders/${order.id}/delivery-otp/resend`).set(auth(driver)).expect(403);
+      // The driver's own resend: same throttle, and the code is never returned to them.
+      await http.post(`${API}/deliveries/${order.id}/otp/resend`).set(auth(driver)).expect(429);
+      await prisma.delivery.update({ where: { orderId: order.id }, data: { otpLastSentAt: new Date(Date.now() - 120_000) } });
+      const byDriver = (await http.post(`${API}/deliveries/${order.id}/otp/resend`).set(auth(driver)).expect(200)).body;
+      expect(byDriver).toMatchObject({ newCode: false, resendAfterSec: 60 });
+      expect(byDriver).not.toHaveProperty('deliveryOtp');
+      expect(JSON.stringify(byDriver)).not.toContain('1234');
 
       const complete = (otp: string) =>
         http.post(`${API}/deliveries/${order.id}/complete`).set(auth(driver)).send({ customerReceived: true, cashCollected: true, otp });

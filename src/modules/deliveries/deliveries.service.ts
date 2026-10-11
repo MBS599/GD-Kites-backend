@@ -14,6 +14,9 @@ const MAX_PROOF_PHOTOS = 5;
 export const DELIVERY_OTP_DIGITS = 4;
 /** Wrong delivery codes before the driver is locked out (the customer can then resend a new code). */
 export const DELIVERY_OTP_MAX_ATTEMPTS = 5;
+/** Minimum gap between delivery-code messages, and how many may be sent per delivery (customer + driver). */
+export const DELIVERY_OTP_RESEND_MS = 60_000;
+export const DELIVERY_OTP_MAX_SENDS = 5;
 /** A driver position older than this is ignored and the route starts at the hub. */
 const LIVE_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -79,6 +82,48 @@ export class DeliveriesService {
     });
     this.realtime.driverUpdated(driver);
     return this.emit(orderId, (o) => this.sms.outForDelivery(o, otp));
+  }
+
+  /**
+   * Driver at the door: sends the customer's delivery code to them again (WhatsApp/SMS
+   * + push). The driver never sees the code. If wrong guesses locked it, a new code
+   * is made. Throttled like the customer's own resend.
+   */
+  async resendOtp(driverId: string, orderId: string) {
+    const d = await this.own(driverId, orderId);
+    if (d.status !== 'IN_TRANSIT' || !d.otpCode) throw new ConflictException('Start the delivery first.');
+    const wait = d.otpLastSentAt ? DELIVERY_OTP_RESEND_MS - (Date.now() - d.otpLastSentAt.getTime()) : 0;
+    if (wait > 0) {
+      const sec = Math.ceil(wait / 1000);
+      throw new HttpException(
+        { message: `Please wait ${sec} s before sending the code again.`, code: 'too_many_requests', details: { retryAfterSec: sec } },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    if (d.otpSentCount >= DELIVERY_OTP_MAX_SENDS) {
+      throw new HttpException(
+        { message: 'The code was already sent several times. The customer can also see it in their GD Kites app.', code: 'too_many_requests' },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    const locked = d.otpAttempts >= DELIVERY_OTP_MAX_ATTEMPTS;
+    const code = locked ? this.otp.code(DELIVERY_OTP_DIGITS) : d.otpCode;
+    await this.prisma.delivery.update({
+      where: { id: d.id },
+      data: { otpCode: code, otpAttempts: locked ? 0 : undefined, otpSentCount: { increment: 1 }, otpLastSentAt: new Date() },
+    });
+    const o = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { id: true, number: true, customerId: true, contactPhone: true },
+    });
+    this.sms.deliveryOtp(o, code);
+    const digits = o.contactPhone.replace(/\D/g, '');
+    return {
+      sentTo: digits.length >= 4 ? `••••• ${digits.slice(-4)}` : null,
+      newCode: locked,
+      resendAfterSec: DELIVERY_OTP_RESEND_MS / 1000,
+      sendsLeft: DELIVERY_OTP_MAX_SENDS - d.otpSentCount - 1,
+    };
   }
 
   /** Attaches an already-stored proof photo to the delivery. */
