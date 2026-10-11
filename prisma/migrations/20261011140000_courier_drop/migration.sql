@@ -13,3 +13,11 @@ ALTER TABLE "Order" ADD COLUMN "deliveryMode" "DeliveryMode" NOT NULL DEFAULT 'L
 ADD COLUMN "packingCharge" DECIMAL(10,2) NOT NULL DEFAULT 0,
 ADD COLUMN "courierName" TEXT,
 ADD COLUMN "courierDocket" TEXT;
+
+-- The order total now includes the packing charge.
+ALTER TABLE "Order" DROP CONSTRAINT "Order_amounts_nonneg";
+ALTER TABLE "Order" ADD CONSTRAINT "Order_amounts_nonneg" CHECK (
+  "subtotal" >= 0 AND "deliveryCharge" >= 0 AND "deliveryTax" >= 0 AND "paymentFee" >= 0 AND "paidOnline" >= 0
+  AND "packingCharge" >= 0
+  AND "total" = "subtotal" + "deliveryCharge" + "deliveryTax" + "paymentFee" + "packingCharge"
+);
