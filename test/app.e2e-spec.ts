@@ -1607,6 +1607,19 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('driver delivery limit', () => {
+    it('assigns to a driver already on a delivery; an optional limit caps open deliveries', async () => {
+      const drivers = (await http.get(`${API}/drivers`).set(auth(admin)).expect(200)).body.drivers;
+      expect(drivers[0]).toHaveProperty('maxActiveDeliveries', null);
+      const d = drivers[0];
+      await http.patch(`${API}/drivers/${d.id}`).set(auth(admin)).send({ maxActiveDeliveries: 0 }).expect(400);
+      const set = (await http.patch(`${API}/drivers/${d.id}`).set(auth(admin)).send({ maxActiveDeliveries: 3 }).expect(200)).body.driver;
+      expect(set.maxActiveDeliveries).toBe(3);
+      const cleared = (await http.patch(`${API}/drivers/${d.id}`).set(auth(admin)).send({ maxActiveDeliveries: null }).expect(200)).body.driver;
+      expect(cleared.maxActiveDeliveries).toBeNull();
+    });
+  });
+
   describe('app updates', () => {
     it('the app learns the newest build and the force-update minimum set by the admin', async () => {
       const v = (await http.get(`${API}/app/version`).expect(200)).body.android;

@@ -169,7 +169,12 @@ export class DispatchService {
       .map((driver) => {
         const open = driver.deliveries.map((d) => ({ lat: d.order.addrLat, lng: d.order.addrLng }));
         const fresh =
-          driver.lastLat != null && driver.lastLng != null && driver.lastLocationAt && now - driver.lastLocationAt.getTime() < FRESH_LOCATION_MS;
+          driver.lastLat != null &&
+          driver.lastLng != null &&
+          driver.lastLocationAt &&
+          now - driver.lastLocationAt.getTime() < FRESH_LOCATION_MS &&
+          // A far-off position is a bad fix (e.g. a laptop browser's internet-based guess).
+          haversineKm(hub.lat, hub.lng, driver.lastLat, driver.lastLng) <= 60;
         let distanceKm: number;
         let reason: string;
         let score: number;
@@ -193,7 +198,7 @@ export class DispatchService {
           reason = 'Free · starts from the hub';
           score = distanceKm + 2;
         }
-        if (open.length + stops.length > maxPerDriver) {
+        if (open.length + stops.length > (driver.maxActiveDeliveries ?? maxPerDriver)) {
           score += 100;
           reason += ` · already has ${open.length} open`;
         }

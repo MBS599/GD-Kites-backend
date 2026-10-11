@@ -306,6 +306,17 @@ export class OrdersService {
       });
       if (!driver || !driver.isActive || !driver.user.isActive) throw new NotFoundException('Driver not found.');
       if (driver.availability === 'OFFLINE') throw new ConflictException(`${driver.user.name} is offline.`);
+      // Optional per-driver cap on open deliveries (none set = no limit).
+      if (driver.maxActiveDeliveries != null) {
+        const open = await tx.delivery.count({
+          where: { driverId, status: { in: ['ASSIGNED', 'IN_TRANSIT'] }, NOT: { orderId: id } },
+        });
+        if (open >= driver.maxActiveDeliveries) {
+          throw new ConflictException(
+            `${driver.user.name} already has ${open} open ${open === 1 ? 'delivery' : 'deliveries'} (limit ${driver.maxActiveDeliveries}). Choose another driver or raise the limit.`,
+          );
+        }
+      }
       if (driver.serviceAreaId && o.serviceAreaId && driver.serviceAreaId !== o.serviceAreaId) {
         throw new ConflictException(`${driver.user.name} works in a different service area.`);
       }

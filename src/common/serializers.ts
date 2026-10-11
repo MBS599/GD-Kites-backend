@@ -17,6 +17,7 @@ import type {
 } from '@prisma/client';
 import { driverTariffOf } from './rates';
 import { contains } from '../domain/geofence';
+import { haversineKm } from '../domain/geo';
 import { etaMinutes } from '../domain/pricing';
 
 /**
@@ -271,6 +272,13 @@ export function addressOut(a: Address & { serviceArea?: ServiceArea | null }) {
   };
 }
 
+/** Farther than this from the driver's hub, a saved position is a bad fix (a laptop browser's internet-based guess). */
+export const MAX_DRIVER_OFFSET_KM = 60;
+
+export function plausibleDriverFix(area: { hubLat: number; hubLng: number } | null | undefined, lat: number, lng: number) {
+  return !area || haversineKm(area.hubLat, area.hubLng, lat, lng) <= MAX_DRIVER_OFFSET_KM;
+}
+
 export function driverOut(d: DriverWithUser, counts?: { activeDeliveries?: number; deliveriesToday?: number }) {
   return {
     id: d.id,
@@ -301,11 +309,13 @@ export function driverOut(d: DriverWithUser, counts?: { activeDeliveries?: numbe
     hub: d.serviceArea?.hubName ?? d.hub,
     serviceArea: areaRef(d.serviceArea),
     lastLocation:
-      d.lastLat != null && d.lastLng != null
+      d.lastLat != null && d.lastLng != null && plausibleDriverFix(d.serviceArea, d.lastLat, d.lastLng)
         ? { lat: d.lastLat, lng: d.lastLng, at: d.lastLocationAt?.toISOString() ?? null }
         : null,
     activeDeliveries: counts?.activeDeliveries ?? 0,
     deliveriesToday: counts?.deliveriesToday ?? 0,
+    /** Optional cap on open deliveries; null = no limit. */
+    maxActiveDeliveries: d.maxActiveDeliveries,
   };
 }
 

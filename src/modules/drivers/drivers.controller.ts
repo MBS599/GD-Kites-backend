@@ -18,6 +18,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   IsEmail,
   IsIn,
+  IsInt,
   IsLatitude,
   IsLongitude,
   IsNumber,
@@ -70,6 +71,9 @@ export class UpdateDriverDto {
   customBaseFare?: number | null;
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(10000)
   customPerKm?: number | null;
+  /** Most open deliveries this driver can hold at once; null = no limit. */
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsInt() @Min(1) @Max(100)
+  maxActiveDeliveries?: number | null;
 }
 
 /** An admin who also delivers: their vehicle. */

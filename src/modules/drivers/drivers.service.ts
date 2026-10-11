@@ -3,7 +3,7 @@ import { pageArgs, toPage, type PageQuery } from '../../common/paging';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PHONE_TAKEN, phoneInUse } from '../../common/phone-unique';
 import { Prisma, type DriverType } from '@prisma/client';
-import { driverInclude, driverOut, orderInclude, orderOut, type DriverWithUser, type FullOrder } from '../../common/serializers';
+import { driverInclude, driverOut, orderInclude, orderOut, type DriverWithUser, type FullOrder, plausibleDriverFix } from '../../common/serializers';
 import { startOfToday } from '../../common/time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -86,6 +86,9 @@ export class DriversService {
    * offline — drivers are only tracked when on duty. Customers never see it.
    */
   async updateLocation(driverId: string, lat: number, lng: number) {
+    // Ignore positions far from the driver's area (a laptop browser guessing from the internet line).
+    const profile = await this.prisma.driverProfile.findUnique({ where: { id: driverId }, select: { serviceArea: true } });
+    if (!plausibleDriverFix(profile?.serviceArea, lat, lng)) return null;
     const at = new Date();
     const { count } = await this.prisma.driverProfile.updateMany({
       where: { id: driverId, availability: { not: 'OFFLINE' } },
@@ -257,6 +260,7 @@ export class DriversService {
       type?: DriverType;
       customBaseFare?: number | null;
       customPerKm?: number | null;
+      maxActiveDeliveries?: number | null;
     },
   ) {
     const existing = await this.prisma.driverProfile.findUnique({ where: { id } });
@@ -275,6 +279,7 @@ export class DriversService {
         vehicleTypeId: input.vehicleTypeId,
         vehicleNumber: input.vehicleNumber?.trim().toUpperCase(),
         type: input.type,
+        ...(input.maxActiveDeliveries !== undefined ? { maxActiveDeliveries: input.maxActiveDeliveries } : {}),
         ...(touchesCustom
           ? {
               customBaseFare: input.customBaseFare == null ? null : new Prisma.Decimal(input.customBaseFare),

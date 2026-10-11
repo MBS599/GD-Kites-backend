@@ -1,3 +1,4 @@
+import { haversineKm } from '../../domain/geo';
 import { BadRequestException, ConflictException, HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import type { AuthUser } from '../../common/auth.decorators';
 import { orderInclude, orderOut, type FullOrder } from '../../common/serializers';
@@ -15,6 +16,9 @@ export const DELIVERY_OTP_DIGITS = 4;
 export const DELIVERY_OTP_MAX_ATTEMPTS = 5;
 /** A driver position older than this is ignored and the route starts at the hub. */
 const LIVE_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
+
+/** Farther than this from the hub, a driver position is treated as a bad fix. */
+const MAX_DRIVER_OFFSET_KM = 60; // same as serializers.MAX_DRIVER_OFFSET_KM
 
 @Injectable()
 export class DeliveriesService {
@@ -184,8 +188,12 @@ export class DeliveriesService {
       lng: area?.hubLng ?? this.config.hub.lng,
       label: area?.hubName ?? 'Hub',
     };
+    // A position far from the hub is a bad fix (laptop browsers guess from the internet
+    // connection, e.g. Mumbai for a Pune line): plan from the hub instead.
+    const plausible =
+      driver.lastLat != null && driver.lastLng != null && haversineKm(hub.lat, hub.lng, driver.lastLat, driver.lastLng) <= MAX_DRIVER_OFFSET_KM;
     const origin =
-      fresh && driver.lastLat != null && driver.lastLng != null
+      fresh && plausible && driver.lastLat != null && driver.lastLng != null
         ? { lat: driver.lastLat, lng: driver.lastLng, source: 'driver' as const, label: 'Your location' }
         : { lat: hub.lat, lng: hub.lng, source: 'hub' as const, label: hub.label };
 
