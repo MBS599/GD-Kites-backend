@@ -132,6 +132,10 @@ model AppSettings {
   deliveryVehicleType   VehicleType? @relation("DeliveryChargeVehicle", fields: [deliveryVehicleTypeId], references: [id], onDelete: SetNull)
   /// Force update: Android builds below this number must update before they can be used (0 = off).
   androidMinBuild       Int          @default(0)
+  /// "Send by courier" offered at checkout.
+  courierEnabled        Boolean      @default(true)
+  /// Packing charge for courier orders, in rupees (the only charge besides the goods).
+  courierPackingCharge  Decimal      @default(200) @db.Decimal(10, 2)
   /// Shown on the update screens (e.g. what changed); null for the default text.
   updateMessage         String?
   updatedAt             DateTime     @updatedAt
@@ -180,7 +184,20 @@ model ServiceArea {
   @@index([isActive])
 }
 
+enum AddressKind {
+  SHOP
+  COURIER
+}
+
+enum DeliveryMode {
+  LOCAL
+  COURIER
+}
+
 model Address {
+  /// COURIER: a courier office where GD drops the parcel (the customer ships it on).
+  kind           AddressKind  @default(SHOP)
+  courierName    String?
   id             String       @id @default(uuid())
   userId         String
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -354,6 +371,12 @@ model Order {
   distanceKm       Float
   contactName      String
   contactPhone     String
+  /// COURIER: dropped at a courier office; only the packing charge applies.
+  deliveryMode     DeliveryMode         @default(LOCAL)
+  packingCharge    Decimal              @default(0) @db.Decimal(10, 2)
+  courierName      String?
+  /// Courier receipt / docket number, entered by the driver at drop-off.
+  courierDocket    String?
   addrLandmark     String?
   addrInstructions String?
   altPhone         String?
@@ -406,32 +429,32 @@ model OrderStatusHistory {
 }
 
 model DriverProfile {
-  id             String             @id @default(uuid())
-  userId         String             @unique
-  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                  String             @id @default(uuid())
+  userId              String             @unique
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// Area the driver works in; admins can only assign orders from the same area.
-  serviceAreaId  String?
-  serviceArea    ServiceArea?       @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
-  type           DriverType         @default(GD)
-  availability   DriverAvailability @default(AVAILABLE)
-  vehicleNumber  String
+  serviceAreaId       String?
+  serviceArea         ServiceArea?       @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
+  type                DriverType         @default(GD)
+  availability        DriverAvailability @default(AVAILABLE)
+  vehicleNumber       String
   /// Vehicle category; its rates set this driver's fare unless overridden below.
-  vehicleTypeId  String?
-  vehicleType    VehicleType?       @relation(fields: [vehicleTypeId], references: [id], onDelete: Restrict)
+  vehicleTypeId       String?
+  vehicleType         VehicleType?       @relation(fields: [vehicleTypeId], references: [id], onDelete: Restrict)
   /// Per-driver negotiated fare (both set = override the vehicle type's rates).
-  customBaseFare Decimal?           @db.Decimal(10, 2)
-  customPerKm    Decimal?           @db.Decimal(10, 2)
+  customBaseFare      Decimal?           @db.Decimal(10, 2)
+  customPerKm         Decimal?           @db.Decimal(10, 2)
   /// Optional cap on open (assigned / in transit) deliveries; null = no limit.
   maxActiveDeliveries Int?
-  hub            String             @default("Katraj hub")
+  hub                 String             @default("Katraj hub")
   /// Off: not listed or assignable, and can't use the delivery screens (history kept).
   /// Used when an admin who also delivers stops delivering.
-  isActive       Boolean            @default(true)
-  lastLat        Float?
-  lastLng        Float?
-  lastLocationAt DateTime?
-  createdAt      DateTime           @default(now())
-  deliveries     Delivery[]
+  isActive            Boolean            @default(true)
+  lastLat             Float?
+  lastLng             Float?
+  lastLocationAt      DateTime?
+  createdAt           DateTime           @default(now())
+  deliveries          Delivery[]
 
   @@index([availability])
 }

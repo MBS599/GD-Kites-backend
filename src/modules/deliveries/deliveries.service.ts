@@ -60,7 +60,9 @@ export class DeliveriesService {
 
   async start(user: AuthUser, driverId: string, orderId: string) {
     await this.own(driverId, orderId);
-    const otp = this.otp.code(DELIVERY_OTP_DIGITS);
+    // Courier drop-off: the customer isn't there, so no handover code.
+    const courier = (await this.prisma.order.findUniqueOrThrow({ where: { id: orderId }, select: { deliveryMode: true } })).deliveryMode === 'COURIER';
+    const otp = courier ? null : this.otp.code(DELIVERY_OTP_DIGITS);
     const driver = await this.prisma.tx(async (tx) => {
       const o = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       const to = assertTransition('start', o.status, 'DRIVER');
@@ -73,15 +75,15 @@ export class DeliveriesService {
           // Handover code: the customer tells it to the driver on delivery.
           otpCode: otp,
           otpAttempts: 0,
-          otpSentCount: 1,
-          otpLastSentAt: new Date(),
+          otpSentCount: otp ? 1 : 0,
+          otpLastSentAt: otp ? new Date() : null,
           otpVerifiedAt: null,
         },
       });
       return refreshDriverAvailability(tx, driverId);
     });
     this.realtime.driverUpdated(driver);
-    return this.emit(orderId, (o) => this.sms.outForDelivery(o, otp));
+    return this.emit(orderId, (o) => (otp ? this.sms.outForDelivery(o, otp) : this.sms.courierOnTheWay(o)));
   }
 
   /**
@@ -142,11 +144,20 @@ export class DeliveriesService {
     user: AuthUser,
     driverId: string,
     orderId: string,
-    input: { customerReceived: boolean; cashCollected: boolean; otp?: string },
+    input: { customerReceived: boolean; cashCollected: boolean; otp?: string; courierDocket?: string },
   ) {
-    if (!input.customerReceived) throw new BadRequestException('Confirm that the customer received the order.');
-    if (!input.cashCollected) throw new BadRequestException('Confirm that cash on delivery was collected.');
     const d = await this.own(driverId, orderId);
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { deliveryMode: true, total: true, paidOnline: true },
+    });
+    const courier = order.deliveryMode === 'COURIER';
+    const due = order.total.sub(order.paidOnline);
+    if (!input.customerReceived) {
+      throw new BadRequestException(courier ? 'Confirm that the courier office received the parcel.' : 'Confirm that the customer received the order.');
+    }
+    // Nothing to collect when the order is fully paid (e.g. courier orders paid online).
+    if (!input.cashCollected && due.gt(0)) throw new BadRequestException('Confirm that cash on delivery was collected.');
     if (d.proofPhotoUrls.length === 0) throw new BadRequestException('Upload at least one proof-of-delivery photo.');
     await this.checkOtp(d, input.otp);
 
@@ -165,13 +176,17 @@ export class DeliveriesService {
           otpVerifiedAt: d.otpCode ? now : null,
         },
       });
+      if (courier) {
+        const docket = input.courierDocket?.replace(/\s+/g, ' ').trim();
+        if (docket) await tx.order.update({ where: { id: orderId }, data: { courierDocket: docket.slice(0, 40) } });
+      }
       for (const productId of new Set(o.items.map((i) => i.productId))) {
         await tx.product.update({ where: { id: productId }, data: { buyerCount: { increment: 1 } } });
       }
       return refreshDriverAvailability(tx, driverId);
     });
     this.realtime.driverUpdated(driver);
-    return this.emit(orderId, (o) => this.sms.orderDelivered(o));
+    return this.emit(orderId, (o) => (courier ? this.sms.courierDropped(o) : this.sms.orderDelivered(o)));
   }
 
   /**

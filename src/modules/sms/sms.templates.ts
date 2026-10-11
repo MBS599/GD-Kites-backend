@@ -44,6 +44,18 @@ export const SMS_TEMPLATES = {
     text: '{#var#} is your GD Kite Center login OTP. It is valid for 5 minutes. Do not share it with anyone.',
     secretVar: 0,
   },
+  /** [first name, order, items, courier, driver] */
+  courierOnTheWay: {
+    audience: 'customer',
+    text: 'Hi {#var#}, your order #{#var#} for {#var#} is packed and on its way to {#var#} with {#var#}. We will message you when it is handed over.',
+    long: [2],
+  },
+  /** [first name, order, items, courier, docket] */
+  courierDropped: {
+    audience: 'customer',
+    text: 'Hi {#var#}, your order #{#var#} for {#var#} has been handed to {#var#}. Courier receipt / docket: {#var#}. Thank you for shopping with GD Kite Center!',
+    long: [2],
+  },
   /** [first name, order, items, total] */
   orderDelivered: {
     audience: 'customer',

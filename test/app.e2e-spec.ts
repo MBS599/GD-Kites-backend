@@ -1627,6 +1627,55 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('send by courier', () => {
+    it('drops at a courier office: packing charge only, no OTP, docket sent to the customer', async () => {
+      // Courier office address (inside the Pune area), no shop number needed.
+      const office = (
+        await http
+          .post(`${API}/addresses`)
+          .set(auth(customer))
+          .send({ kind: 'courier', courierName: 'Shree Maruti Courier, Katraj', area: 'Katraj', city: 'Pune', pincode: '411046', lat: 18.4529, lng: 73.8652 })
+          .expect(201)
+      ).body.address;
+      expect(office).toMatchObject({ kind: 'courier', courierName: 'Shree Maruti Courier, Katraj', label: 'Shree Maruti Courier, Katraj', isDefault: false });
+      await http.post(`${API}/addresses`).set(auth(customer)).send({ kind: 'courier', area: 'Katraj', pincode: '411046', lat: 18.4529, lng: 73.8652 }).expect(400);
+
+      const quote = (await http.get(`${API}/addresses/quote?lat=18.4529&lng=73.8652&courier=1`).set(auth(customer)).expect(200)).body;
+      expect(quote).toMatchObject({ courier: true, deliveryCharge: 0, packingCharge: 200 });
+
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 50 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: office.id }).expect(201)).body.order;
+      expect(order).toMatchObject({ deliveryMode: 'courier', deliveryCharge: 0, packingCharge: 200, courierName: 'Shree Maruti Courier, Katraj' });
+      expect(order.total).toBeCloseTo(order.subtotal + 200, 2);
+
+      await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(200);
+      await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: driver.user.driverId }).expect(200);
+      await http.post(`${API}/deliveries/${order.id}/start`).set(auth(driver)).expect(200);
+      const png = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        'base64',
+      );
+      await http.post(`${API}/deliveries/${order.id}/proof`).set(auth(driver)).attach('file', png, { filename: 'r.png', contentType: 'image/png' }).expect(201);
+      // No customer at the courier office: no OTP needed, and the driver can't resend one.
+      await http.post(`${API}/deliveries/${order.id}/otp/resend`).set(auth(driver)).expect(409);
+      const done = (
+        await http
+          .post(`${API}/deliveries/${order.id}/complete`)
+          .set(auth(driver))
+          .send({ customerReceived: true, cashCollected: true, courierDocket: ' SM 123456 ' })
+          .expect(200)
+      ).body.order;
+      expect(done).toMatchObject({ status: 'delivered', courierDocket: 'SM 123456' });
+
+      await app.get(SmsService).drain();
+      const events = (await prisma.smsMessage.findMany({ where: { orderId: order.id } })).map((m) => m.event);
+      expect(events).toEqual(expect.arrayContaining(['courierOnTheWay', 'courierDropped']));
+      expect(events).not.toContain('outForDelivery');
+      await http.delete(`${API}/addresses/${office.id}`).set(auth(customer)).expect(204);
+    });
+  });
+
   describe('app updates', () => {
     it('the app learns the newest build and the force-update minimum set by the admin', async () => {
       const v = (await http.get(`${API}/app/version`).expect(200)).body.android;

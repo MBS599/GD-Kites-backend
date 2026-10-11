@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsOptional, Matches } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { CurrentUser, Roles, type AuthUser } from '../../common/auth.decorators';
 import { imageUpload, publicUrl } from '../../common/uploads';
 import { AppConfig } from '../../config/app-config.service';
@@ -30,6 +30,8 @@ export class CompleteDeliveryDto {
   @IsBoolean() cashCollected: boolean;
   /** 4-digit code the customer shares at handover (sent by SMS, shown in their app). */
   @IsOptional() @Matches(/^[0-9]{4}$/, { message: 'Enter the 4-digit delivery OTP.' }) otp?: string;
+  /** Courier drop-off: the courier's receipt / docket number (optional). */
+  @IsOptional() @IsString() @MaxLength(40) courierDocket?: string;
 }
 
 /** Driver-only delivery workflow. `:orderId` is the order being delivered. */

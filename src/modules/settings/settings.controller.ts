@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Get, Injectable, Patch } from '@
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { readFile } from 'node:fs/promises';
 import { Transform } from 'class-transformer';
-import { IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { Public } from '../../common/auth.decorators';
 import { AppConfig } from '../../config/app-config.service';
 import { Roles } from '../../common/auth.decorators';
@@ -62,6 +62,10 @@ export class UpdateSettingsDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(10_000_000) minOrderValue?: number;
   /** Vehicle type whose rate sets the customer delivery charge (the Tempo). */
   @IsOptional() @IsUUID() deliveryVehicleTypeId?: string;
+  /** "Send by courier" at checkout on/off. */
+  @IsOptional() @IsBoolean() courierEnabled?: boolean;
+  /** Packing charge for courier orders, in rupees. Default 200. */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100_000) courierPackingCharge?: number;
   /** Force update: Android builds below this must update first. 0 turns it off. */
   @IsOptional() @IsInt() @Min(0) @Max(1_000_000_000) androidMinBuild?: number;
   /** Text on the update screens (what changed). Empty/null for the default. */
@@ -84,6 +88,8 @@ const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
   deliveryVehicleType: s.deliveryVehicleType ? vehicleTypeOut(s.deliveryVehicleType) : null,
   androidMinBuild: s.androidMinBuild,
   updateMessage: s.updateMessage,
+  courierEnabled: s.courierEnabled,
+  courierPackingCharge: s.courierPackingCharge.toNumber(),
 });
 
 @ApiTags('Settings')

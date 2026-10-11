@@ -170,6 +170,29 @@ export class SmsService {
     return m.status;
   }
 
+  /** Courier drop-off started (no handover code: the customer isn't at the courier office). */
+  courierOnTheWay(o: FullOrder) {
+    const d = o.delivery?.driver;
+    this.toCustomer(o, 'courierOnTheWay', [
+      firstName(o.contactName),
+      orderCode(o.number),
+      itemsLine(o.items),
+      o.courierName ?? 'the courier office',
+      d?.user.name ?? 'our driver',
+    ]);
+  }
+
+  /** Parcel handed to the courier, with the docket number when the driver entered one. */
+  courierDropped(o: FullOrder) {
+    this.toCustomer(o, 'courierDropped', [
+      firstName(o.contactName),
+      orderCode(o.number),
+      itemsLine(o.items),
+      o.courierName ?? 'the courier office',
+      o.courierDocket ?? 'see the photo in your GD Kites app',
+    ]);
+  }
+
   orderDelivered(o: FullOrder) {
     this.toCustomer(o, 'orderDelivered', [firstName(o.contactName), orderCode(o.number), itemsLine(o.items), money(o.total)]);
   }
@@ -328,6 +351,8 @@ const GREETS_BY_NAME = new Set<SmsEvent>([
   'outForDelivery',
   'orderDelivered',
   'orderCancelled',
+  'courierOnTheWay',
+  'courierDropped',
 ]);
 
 /** "100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord, +3 more" for messages. */

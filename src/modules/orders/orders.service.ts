@@ -235,13 +235,25 @@ export class OrdersService {
         });
       }
 
+      // Courier drop-off: no delivery charge, only the packing charge (settings master), and
+      // the whole order is paid online (no one pays the driver at the courier office).
+      const courier = address.kind === 'COURIER';
+      const courierSettings = courier
+        ? await tx.appSettings.findUnique({ where: { id: 1 }, select: { courierEnabled: true, courierPackingCharge: true } })
+        : null;
+      if (courier && courierSettings && !courierSettings.courierEnabled) {
+        throw new BadRequestException('Sending by courier is not available right now. Choose a delivery address.');
+      }
+      const packingCharge = courier ? (courierSettings?.courierPackingCharge ?? new Prisma.Decimal(200)) : new Prisma.Decimal(0);
       // Customer delivery charge: the delivery vehicle's (Tempo) rate × km, set in admin settings.
-      const deliveryCharge = new Prisma.Decimal(deliveryChargeFor(coverage.distanceKm, await this.settings.deliveryTariff()));
+      const deliveryCharge = courier
+        ? new Prisma.Decimal(0)
+        : new Prisma.Decimal(deliveryChargeFor(coverage.distanceKm, await this.settings.deliveryTariff()));
       // With online payments on, the delivery charge is paid first; the order reaches the admin once paid.
-      awaiting = this.payments.requiresPayment(deliveryCharge);
+      awaiting = courier ? this.payments.enabled : this.payments.requiresPayment(deliveryCharge);
       const status: OrderStatus = awaiting ? 'AWAITING_PAYMENT' : 'PENDING';
       // Paid online: GST on the delivery charge + the gateway fee (admin settings), added to the total.
-      const online = awaiting ? await this.payments.onlineCharges(deliveryCharge) : { tax: 0, fee: 0 };
+      const online = awaiting && !courier ? await this.payments.onlineCharges(deliveryCharge) : { tax: 0, fee: 0 };
       const deliveryTax = new Prisma.Decimal(online.tax);
       const paymentFee = new Prisma.Decimal(online.fee);
       const created = await tx.order.create({
@@ -255,7 +267,10 @@ export class OrdersService {
           deliveryCharge,
           deliveryTax,
           paymentFee,
-          total: subtotal.add(deliveryCharge).add(deliveryTax).add(paymentFee),
+          total: subtotal.add(deliveryCharge).add(deliveryTax).add(paymentFee).add(packingCharge),
+          deliveryMode: courier ? 'COURIER' : 'LOCAL',
+          packingCharge,
+          courierName: courier ? address.courierName : null,
           addrLabel: address.label,
           addrArea: address.area,
           addrLine: address.line,

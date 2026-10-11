@@ -86,6 +86,26 @@ export const WA_TEMPLATES: Record<SmsEvent, WaTemplate> = {
     examples: ['123456'],
     params: same,
   },
+  courierOnTheWay: {
+    name: 'gdk_courier_on_the_way_v1',
+    category: 'UTILITY',
+    body:
+      'Hi {{1}},\n\nYour order *#{{2}}* for {{3}} is packed and on its way to *{{4}}* with {{5}}.\n\n' +
+      'We will message you as soon as it is handed over to the courier.' +
+      SIGN,
+    examples: ['Mayur', 'GD1037', '100 × Premium Fighter Kite (Medium)', 'Shree Maruti Courier, Katraj', 'Gaurav Dhamal'],
+    params: same,
+  },
+  courierDropped: {
+    name: 'gdk_courier_dropped_v1',
+    category: 'UTILITY',
+    body:
+      'Hi {{1}},\n\nYour order *#{{2}}* for {{3}} has been handed over to *{{4}}*.\n\n' +
+      '*Courier receipt / docket: {{5}}*\nPlease arrange the courier from there. Thank you for shopping with GD Kite Center!' +
+      SIGN,
+    examples: ['Mayur', 'GD1037', '100 × Premium Fighter Kite (Medium)', 'Shree Maruti Courier, Katraj', 'SM123456'],
+    params: same,
+  },
   orderDelivered: {
     name: 'gdk_order_delivered_v3',
     category: 'UTILITY',

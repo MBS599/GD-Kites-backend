@@ -15,7 +15,7 @@ import {
 import { ApiBearerAuth, ApiTags, PartialType } from '@nestjs/swagger';
 import type { Address } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsLatitude, IsLongitude, IsNumber, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsBoolean, IsIn, IsLatitude, IsLongitude, IsNumber, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { CurrentUser, Roles, type AuthUser } from '../../common/auth.decorators';
 import { addressOut } from '../../common/serializers';
 import { findServiceArea } from '../../domain/geofence';
@@ -33,6 +33,10 @@ const MOBILE_RE = /^(\+?91[\s-]?|0)?[6-9]\d{4}[\s-]?\d{5}$/;
 const MOBILE_MSG = 'Enter a valid 10-digit Indian mobile number.';
 
 export class CreateAddressDto {
+  /** 'courier': a courier office where GD drops the parcel (default 'shop'). */
+  @IsOptional() @IsIn(['shop', 'courier']) kind?: 'shop' | 'courier';
+  /** Courier company and branch, e.g. "Shree Maruti Courier, Katraj" (courier addresses). */
+  @IsOptional() @IsString() @MaxLength(80) courierName?: string;
   /** "Shop", "Godown"… (defaults to "Shop"). */
   @IsOptional() @IsString() @MaxLength(40) label?: string;
   @IsOptional() @IsString() @MaxLength(80) contactName?: string;
@@ -62,6 +66,8 @@ export class UpdateAddressDto extends PartialType(CreateAddressDto) {}
 export class QuoteQuery {
   @Type(() => Number) @IsNumber() @IsLatitude() lat: number;
   @Type(() => Number) @IsNumber() @IsLongitude() lng: number;
+  /** '1': a courier drop-off (packing charge only, no delivery charge). */
+  @IsOptional() @IsIn(['0', '1', 'true', 'false']) courier?: string;
 }
 
 /** Trimmed single-line text without control characters; null when empty. */
@@ -132,7 +138,8 @@ export class AddressesController {
     const fields = this.fields(dto, null);
     const address = await this.prisma.tx(async (tx) => {
       const live = await tx.address.count({ where: { userId: user.id, isDeleted: false } });
-      const isDefault = dto.isDefault === true || live === 0;
+      // A courier office is never the default address (the customer's own shop is).
+    const isDefault = fields.kind === 'SHOP' && (dto.isDefault === true || live === 0);
       if (isDefault) await tx.address.updateMany({ where: { userId: user.id, isDefault: true }, data: { isDefault: false } });
       return tx.address.create({
         data: {
@@ -200,6 +207,9 @@ export class AddressesController {
    * saved address on update: fields left out keep their value.
    */
   private fields(dto: UpdateAddressDto, current: Address | null) {
+    const courier = dto.kind ? dto.kind === 'courier' : current?.kind === 'COURIER';
+    const courierName = dto.courierName !== undefined ? clean(dto.courierName) : (current?.courierName ?? null);
+    if (courier && (!courierName || courierName.length < 2)) throw new BadRequestException('Enter the courier name.');
     const pick = <K extends keyof UpdateAddressDto & keyof Address>(k: K) =>
       dto[k] !== undefined ? clean(dto[k] as string | null) : current ? (current[k] as string | null) : null;
 
@@ -207,7 +217,10 @@ export class AddressesController {
     const buildingName = pick('buildingName');
     const street = pick('street');
     const structured = dto.houseNumber !== undefined || dto.buildingName !== undefined || dto.street !== undefined;
-    const line = structured || !dto.line ? lineOf({ houseNumber, buildingName, street }) || current?.line || '' : clean(dto.line)!;
+    // A courier office needs no shop number: its name stands in for the line.
+    const line =
+      (structured || !dto.line ? lineOf({ houseNumber, buildingName, street }) || current?.line || '' : clean(dto.line)!) ||
+      (courier ? courierName! : '');
     if (dto.line !== undefined || structured || !current) {
       if (line.length < 3) throw new BadRequestException('Enter the house / shop number and street.');
     }
@@ -224,7 +237,9 @@ export class AddressesController {
     }
 
     return {
-      label: pick('label') ?? (current ? current.label : 'Shop'),
+      kind: courier ? ('COURIER' as const) : ('SHOP' as const),
+      courierName: courier ? courierName : null,
+      label: pick('label') ?? (courier ? courierName! : current ? current.label : 'Shop'),
       contactName: pick('contactName'),
       contactPhone,
       alternatePhone,
@@ -259,6 +274,23 @@ export class AddressesController {
       };
     }
     const settings = await this.settings.get();
+    if (q.courier === '1' || q.courier === 'true') {
+      // Courier drop-off: no delivery charge, only packing; paid in full online.
+      return {
+        serviceable: true,
+        courier: true,
+        courierEnabled: settings.courierEnabled,
+        serviceArea: { id: hit.area.id, name: hit.area.name },
+        distanceKm: hit.distanceKm,
+        deliveryCharge: 0,
+        packingCharge: settings.courierPackingCharge.toNumber(),
+        deliveryTax: 0,
+        paymentFee: 0,
+        deliveryGstPercent: 0,
+        payOnline: 0,
+        payInFullOnline: this.config.get('PAYMENTS_PROVIDER') === 'razorpay',
+      };
+    }
     const deliveryCharge = deliveryChargeFor(hit.distanceKm, deliveryTariffOf(settings.deliveryVehicleType));
     // Online payments: delivery charge + GST + gateway fee paid now; the items in cash on delivery.
     const online = this.config.get('PAYMENTS_PROVIDER') === 'razorpay' && deliveryCharge > 0;
@@ -274,6 +306,9 @@ export class AddressesController {
       deliveryGstPercent: s?.deliveryGstPercent ?? 0,
       /** Paid online at checkout; 0 = everything cash on delivery. */
       payOnline: charges?.total ?? 0,
+      /** Shown on the "Send by courier" option. */
+      courierEnabled: settings.courierEnabled,
+      packingCharge: settings.courierPackingCharge.toNumber(),
     };
   }
 

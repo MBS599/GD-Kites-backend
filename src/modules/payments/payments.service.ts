@@ -63,8 +63,18 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     return onlineChargesFor(deliveryCharge.toNumber(), s.deliveryGstPercent, s.gatewayFeePercent);
   }
 
-  /** Charged online for an order: delivery charge + GST + gateway fee (fixed when it was placed). */
-  static onlineAmount(o: { deliveryCharge: Prisma.Decimal; deliveryTax: Prisma.Decimal; paymentFee: Prisma.Decimal }) {
+  /**
+   * Charged online for an order (fixed when it was placed): delivery charge + GST + gateway
+   * fee; for a courier drop-off, the whole order (goods + packing).
+   */
+  static onlineAmount(o: {
+    deliveryCharge: Prisma.Decimal;
+    deliveryTax: Prisma.Decimal;
+    paymentFee: Prisma.Decimal;
+    deliveryMode?: string;
+    total?: Prisma.Decimal;
+  }) {
+    if (o.deliveryMode === 'COURIER' && o.total) return o.total;
     return o.deliveryCharge.add(o.deliveryTax).add(o.paymentFee);
   }
 

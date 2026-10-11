@@ -256,6 +256,9 @@ export function addressOut(a: Address & { serviceArea?: ServiceArea | null }) {
     contactName: a.contactName,
     contactPhone: a.contactPhone,
     alternatePhone: a.alternatePhone,
+    /** 'courier': a courier office (GD drops the parcel there). */
+    kind: a.kind === 'COURIER' ? 'courier' : 'shop',
+    courierName: a.courierName,
     houseNumber: a.houseNumber,
     buildingName: a.buildingName,
     street: a.street,
@@ -347,6 +350,11 @@ export function orderOut(o: FullOrder, { driverLocation = false }: { driverLocat
     })),
     subtotal: m(o.subtotal),
     deliveryCharge: m(o.deliveryCharge),
+    /** 'courier': dropped at a courier office (packing charge, no delivery charge, paid online). */
+    deliveryMode: o.deliveryMode === 'COURIER' ? 'courier' : 'local',
+    packingCharge: m(o.packingCharge),
+    courierName: o.courierName,
+    courierDocket: o.courierDocket,
     /** Online payment only: GST on the delivery charge and the gateway fee (both included in total). */
     deliveryTax: m(o.deliveryTax),
     paymentFee: m(o.paymentFee),

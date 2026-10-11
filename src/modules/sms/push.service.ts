@@ -22,6 +22,8 @@ const PUSH: Partial<Record<SmsEvent, (v: string[]) => Omit<PushMessage, 'data'>>
     body: `${code} is on the way with ${driver}. Delivery code: ${otp}`,
   }),
   deliveryOtp: ([otp, code]) => ({ title: 'Delivery code', body: `Code for ${code}: ${otp}. Share it only when you receive your order.` }),
+  courierOnTheWay: ([, code, , courier]) => ({ title: 'On the way to the courier', body: `${code} is packed and going to ${courier}.` }),
+  courierDropped: ([, code, , courier, docket]) => ({ title: 'Handed to the courier', body: `${code} is at ${courier}. Docket: ${docket}` }),
   orderDelivered: ([, code, , amount]) => ({ title: 'Delivered', body: `${code} delivered (Rs ${amount}). Thank you!` }),
   orderCancelled: ([, code, , reason]) => ({ title: 'Order cancelled', body: `${code}: ${reason}` }),
   deliveryAssigned: ([, code, name, area]) => ({ title: 'New delivery', body: `${code} for ${name}, ${area}` }),
