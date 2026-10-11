@@ -35,6 +35,7 @@ import { RazorpayClient } from './payments/razorpay.client';
 import { UsersController } from './users/users.controller';
 import { GeoController } from './geo/geo.controller';
 import { RoutingService } from './routing/routing.service';
+import { RoadDistanceService } from './routing/road-distance.service';
 import { GeoService } from './geo/geo.service';
 import { SmsController } from './sms/sms.controller';
 import { SmsService } from './sms/sms.service';
@@ -66,8 +67,8 @@ export class SmsModule {}
 @Global()
 @Module({
   controllers: [ServiceAreasController, SettingsController, AppVersionController],
-  providers: [ServiceAreasService, SettingsService],
-  exports: [ServiceAreasService, SettingsService],
+  providers: [ServiceAreasService, SettingsService, RoadDistanceService],
+  exports: [ServiceAreasService, SettingsService, RoadDistanceService],
 })
 export class ServiceAreasModule {}
 

@@ -18,7 +18,7 @@ import { Type } from 'class-transformer';
 import { IsBoolean, IsLatitude, IsLongitude, IsNumber, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { CurrentUser, Roles, type AuthUser } from '../../common/auth.decorators';
 import { addressOut } from '../../common/serializers';
-import { distanceFromHub, findServiceArea } from '../../domain/geofence';
+import { findServiceArea } from '../../domain/geofence';
 import { deliveryChargeFor, onlineChargesFor } from '../../domain/pricing';
 import { SettingsService } from '../settings/settings.controller';
 import { deliveryTariffOf } from '../../common/rates';
@@ -111,14 +111,17 @@ export class AddressesController {
       list[0] = { ...list[0], isDefault: true };
     }
     return {
-      addresses: list.map((a) => {
-        const area = findServiceArea(active, a.lat, a.lng);
-        return addressOut({
-          ...a,
-          serviceArea: area,
-          distanceKm: area ? distanceFromHub(area, a.lat, a.lng) : a.distanceKm,
-        });
-      }),
+      addresses: await Promise.all(
+        list.map(async (a) => {
+          const area = findServiceArea(active, a.lat, a.lng);
+          return addressOut({
+            ...a,
+            serviceArea: area,
+            // Road distance from the serving hub (cached), as the delivery charge uses.
+            distanceKm: area ? await this.areas.hubDistanceKm(area, a.lat, a.lng) : a.distanceKm,
+          });
+        }),
+      ),
     };
   }
 

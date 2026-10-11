@@ -10,6 +10,8 @@ import { AuthService } from '../src/modules/auth/auth.service';
 import { PhoneOtpService } from '../src/modules/auth/phone-otp.service';
 import { GoogleVerifier } from '../src/modules/auth/google-verifier.service';
 import { GeoService } from '../src/modules/geo/geo.service';
+import { RoadDistanceService } from '../src/modules/routing/road-distance.service';
+import { roadDistanceKm } from '../src/domain/geo';
 import { OtpGenerator } from '../src/modules/sms/otp';
 import { SmsService } from '../src/modules/sms/sms.service';
 import { PushService } from '../src/modules/sms/push.service';
@@ -68,6 +70,9 @@ describe('GD Kite Center API (e2e)', () => {
         }),
         searchEnabled: false,
       })
+      // Road router stubbed with the straight-line estimate (no internet in tests).
+      .overrideProvider(RoadDistanceService)
+      .useValue({ km: async (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => roadDistanceKm(a.lat, a.lng, b.lat, b.lng) })
       // Predictable one-time codes: login OTP 123456, delivery OTP 1234.
       .overrideProvider(OtpGenerator)
       .useValue({ code: (digits: number) => '123456'.slice(0, digits) })

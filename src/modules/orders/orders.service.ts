@@ -178,6 +178,10 @@ export class OrdersService {
    */
   async place(customer: AuthUser, addressId: string) {
     let awaiting = false;
+    // Look up the road distance before the transaction (a router call inside it could
+    // outlast the transaction timeout); inside, the same lookup comes from the cache.
+    const pin = await this.prisma.address.findFirst({ where: { id: addressId, userId: customer.id }, select: { lat: true, lng: true } });
+    if (pin) await this.areas.resolve(pin.lat, pin.lng).catch(() => null);
     const order = await this.prisma.tx(async (tx) => {
       const address = await tx.address.findFirst({ where: { id: addressId, userId: customer.id, isDeleted: false } });
       if (!address) throw new BadRequestException('Please choose a valid delivery address.');

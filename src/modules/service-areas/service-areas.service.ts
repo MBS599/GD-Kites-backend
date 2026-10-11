@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import type { ServiceArea } from '@prisma/client';
-import { distanceFromHub, findServiceArea } from '../../domain/geofence';
+import { findServiceArea } from '../../domain/geofence';
+import { RoadDistanceService } from '../routing/road-distance.service';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 
 export interface Coverage {
@@ -10,7 +11,15 @@ export interface Coverage {
 
 @Injectable()
 export class ServiceAreasService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly roads: RoadDistanceService,
+  ) {}
+
+  /** Driving distance along roads from [area]'s hub to a point. */
+  hubDistanceKm(area: ServiceArea, lat: number, lng: number): Promise<number> {
+    return this.roads.km({ lat: area.hubLat, lng: area.hubLng }, { lat, lng });
+  }
 
   active(db: PrismaService | Tx = this.prisma) {
     return db.serviceArea.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
@@ -19,7 +28,7 @@ export class ServiceAreasService {
   /** Active area serving a point, with road distance from that area's hub; null if not covered. */
   async resolve(lat: number, lng: number, db: PrismaService | Tx = this.prisma): Promise<Coverage | null> {
     const area = findServiceArea(await this.active(db), lat, lng);
-    return area ? { area, distanceKm: distanceFromHub(area, lat, lng) } : null;
+    return area ? { area, distanceKm: await this.hubDistanceKm(area, lat, lng) } : null;
   }
 
   /** Like [resolve] but throws a user-facing 422 listing where we deliver. */
