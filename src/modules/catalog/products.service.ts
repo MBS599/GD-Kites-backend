@@ -1,7 +1,7 @@
 import { pageArgs, toPage } from '../../common/paging';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { productInclude, productOut } from '../../common/serializers';
+import { isAvailable, productInclude, productOut, type ProductWithCategory } from '../../common/serializers';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import type { ComboItemDto, CreateProductDto, ProductMediaDto, ProductQuery, ProductSpecDto, UpdateProductDto } from './products.dto';
@@ -13,11 +13,49 @@ export class ProductsService {
     private readonly realtime: RealtimeService,
   ) {}
 
+  /**
+   * Sizes of one product: active, sized, non-combo, non-damaged products with the
+   * same name and category, smallest size first. Keyed by [variantKey].
+   */
+  private async variantGroups() {
+    const sized = await this.prisma.product.findMany({
+      where: { isActive: true, isCombo: false, isDamaged: false, sizeId: { not: null } },
+      include: productInclude,
+    });
+    const groups = new Map<string, ProductWithCategory[]>();
+    for (const p of sized) {
+      const key = variantKey(p);
+      groups.set(key, [...(groups.get(key) ?? []), p]);
+    }
+    for (const g of groups.values()) {
+      g.sort((a, b) => (a.size?.sortOrder ?? 0) - (b.size?.sortOrder ?? 0) || a.size!.name.localeCompare(b.size!.name));
+    }
+    return groups;
+  }
+
+  /** Customer view of a product: with its other sizes as `variants` (when it has more than one). */
+  private withVariants(p: ProductWithCategory, groups: Map<string, ProductWithCategory[]>) {
+    const g = p.sizeId && !p.isCombo && !p.isDamaged ? groups.get(variantKey(p)) : undefined;
+    return { ...productOut(p), variants: g && g.length > 1 ? g.map((v) => productOut(v)) : [] };
+  }
+
   async list(q: ProductQuery, admin = false) {
     const { limit, args } = pageArgs(q);
+    const groups = admin ? null : await this.variantGroups();
+    // One card per product: hide the other sizes (shown as variants of the first in stock).
+    const hidden =
+      groups && q.group
+        ? [...groups.values()]
+            .filter((g) => g.length > 1)
+            .flatMap((g) => {
+              const shown = g.find((v) => isAvailable(v)) ?? g[0];
+              return g.filter((v) => v.id !== shown.id).map((v) => v.id);
+            })
+        : [];
     const products = await this.prisma.product.findMany({
       where: {
         isActive: true,
+        ...(hidden.length ? { id: { notIn: hidden } } : {}),
         ...(q.damaged !== undefined ? { isDamaged: q.damaged } : {}),
         ...(q.combo !== undefined ? { isCombo: q.combo } : {}),
         ...(q.outOfStock ? { inStock: false } : {}),
@@ -39,13 +77,16 @@ export class ProductsService {
       ...args,
     });
     const page = toPage(products, limit);
-    return { items: page.items.map((p) => productOut(p, { cost: admin })), nextCursor: page.nextCursor };
+    return {
+      items: page.items.map((p) => (groups ? this.withVariants(p, groups) : productOut(p, { cost: admin }))),
+      nextCursor: page.nextCursor,
+    };
   }
 
   async get(id: string, admin = false) {
     const p = await this.prisma.product.findFirst({ where: { id, isActive: true }, include: productInclude });
     if (!p) throw new NotFoundException('Product not found.');
-    return productOut(p, { cost: admin });
+    return admin ? productOut(p, { cost: true }) : this.withVariants(p, await this.variantGroups());
   }
 
   private async categoryId(slug: string) {
@@ -193,3 +234,6 @@ function cleanSpecs(list?: ProductSpecDto[]): { label: string; value: string }[]
 function cleanMedia(list?: ProductMediaDto[]): { type: 'image' | 'video'; url: string }[] | undefined {
   return list?.map((m) => ({ type: m.type, url: m.url }));
 }
+
+/** Products with the same name (any case/spacing) in the same category are sizes of one product. */
+const variantKey = (p: { categoryId: string; name: string }) => `${p.categoryId}|${p.name.trim().replace(/\s+/g, ' ').toLowerCase()}`;

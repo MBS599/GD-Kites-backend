@@ -364,6 +364,33 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('sizes as one product', () => {
+    it('lists the sizes of a product once, with its other sizes as variants', async () => {
+      const sizes = (await http.get(`${API}/sizes`).set(auth(customer)).expect(200)).body.sizes;
+      const [small, , big] = sizes;
+      const make = (sizeId: string, price: number) =>
+        http.post(`${API}/products`).set(auth(admin)).send({ name: 'Variant Test Kite', category: 'fighterKites', price, sizeId }).expect(201);
+      const a = (await make(big.id, 9)).body.product;
+      const b = (await make(small.id, 6)).body.product;
+
+      const grouped = (await http.get(`${API}/products`).set(auth(customer)).query({ q: 'Variant Test', group: true }).expect(200)).body.products;
+      expect(grouped).toHaveLength(1);
+      expect(grouped[0].id).toBe(b.id); // the smallest size in stock leads
+      expect(grouped[0].variants.map((v: any) => v.size.name)).toEqual(['Small', 'Big']);
+      expect(grouped[0].variants.map((v: any) => v.price)).toEqual([6, 9]);
+
+      // Ungrouped (cart, product page): every size, each knowing the others.
+      const flat = (await http.get(`${API}/products`).set(auth(customer)).query({ q: 'Variant Test' }).expect(200)).body.products;
+      expect(flat).toHaveLength(2);
+      expect((await http.get(`${API}/products/${a.id}`).set(auth(customer)).expect(200)).body.product.variants).toHaveLength(2);
+      // Admins keep editing each size on its own.
+      expect((await http.get(`${API}/products/${a.id}`).set(auth(admin)).expect(200)).body.product.variants).toBeUndefined();
+
+      await http.delete(`${API}/products/${a.id}`).set(auth(admin)).expect(204);
+      await http.delete(`${API}/products/${b.id}`).set(auth(admin)).expect(204);
+    });
+  });
+
   describe('full order lifecycle across roles', () => {
     let orderId: string;
     let kiteId: string;

@@ -131,4 +131,9 @@ export class ProductQuery extends PageQuery {
   combo?: boolean;
   /** Admin: only products switched to out of stock. */
   @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean() outOfStock?: boolean;
+  /**
+   * One card per product: the sizes of a product (same name and category) are listed
+   * once, as `variants` of its first size, like a shop's size picker.
+   */
+  @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean() group?: boolean;
 }
