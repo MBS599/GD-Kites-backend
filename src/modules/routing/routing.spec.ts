@@ -1,5 +1,6 @@
 import type { AppConfig } from '../../config/app-config.service';
-import { OsrmPlanner } from './osrm.planner';
+import { decodePolyline } from './google-routes';
+import { GooglePlanner } from './google.planner';
 import { nearestNeighbourTrip } from './route-planner';
 import { RoutingService } from './routing.service';
 
@@ -8,54 +9,90 @@ const katraj = { lat: 18.4529, lng: 73.8652 };
 const bibwewadi = { lat: 18.4697, lng: 73.8687 };
 const swargate = { lat: 18.5018, lng: 73.8636 };
 
-// Shape of a real OSRM trip response for hub → [katraj, bibwewadi, swargate]:
-// trip visits hub(0) → swargate → bibwewadi → katraj.
-const osrmTrip = {
-  code: 'Ok',
-  waypoints: [
-    { waypoint_index: 0, trips_index: 0 },
-    { waypoint_index: 3, trips_index: 0 },
-    { waypoint_index: 2, trips_index: 0 },
-    { waypoint_index: 1, trips_index: 0 },
-  ],
-  trips: [
+// Google Routes answer for hub → [katraj, bibwewadi, swargate] → hub with optimizeWaypointOrder:
+// visits swargate (2), bibwewadi (1), katraj (0), then drives back to the hub.
+const roundTrip = {
+  routes: [
     {
-      distance: 10941,
-      duration: 1054,
-      geometry: { coordinates: [[73.8656, 18.4866], [73.864, 18.5], [73.8652, 18.4529]] },
+      distanceMeters: 14441,
+      duration: '1474s',
+      optimizedIntermediateWaypointIndex: [2, 1, 0],
+      polyline: { encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@' },
       legs: [
-        { distance: 3063, duration: 300 },
-        { distance: 5114, duration: 480 },
-        { distance: 2765, duration: 274 },
+        { distanceMeters: 3063, duration: '300s' },
+        { distanceMeters: 5114, duration: '480s' },
+        { distanceMeters: 2765, duration: '274s' },
+        { distanceMeters: 3500, duration: '420s' },
       ],
     },
   ],
 };
 
-const config = { get: () => 'https://osrm.example' } as unknown as AppConfig;
+const config = { get: () => 'key-123' } as unknown as AppConfig;
+const ok = (body: object) => jest.fn().mockResolvedValue({ ok: true, json: async () => body });
 
-describe('routing', () => {
+describe('routing (Google Routes)', () => {
   const realFetch = global.fetch;
   afterEach(() => {
     global.fetch = realFetch;
   });
 
-  it('maps OSRM waypoint indexes to the optimal stop order', async () => {
-    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => osrmTrip }) as never;
-    const trip = await new OsrmPlanner('https://osrm.example').planTrip(hub, [katraj, bibwewadi, swargate]);
+  it('maps the optimised waypoint order, legs, return leg and totals', async () => {
+    const fetchMock = ok(roundTrip);
+    global.fetch = fetchMock as never;
+    const trip = await new GooglePlanner('key-123').planTrip(hub, [katraj, bibwewadi, swargate], hub);
     expect(trip.order).toEqual([2, 1, 0]); // swargate, bibwewadi, katraj
-    expect(trip.totalDistanceKm).toBe(10.9);
-    expect(trip.totalDurationMin).toBe(18);
     expect(trip.legs.map((l) => l.distanceKm)).toEqual([3.1, 5.1, 2.8]);
-    expect(trip.geometry[0]).toEqual({ lat: 18.4866, lng: 73.8656 });
+    expect(trip.returnLeg).toEqual({ distanceKm: 3.5, durationMin: 7 });
+    expect(trip.totalDistanceKm).toBe(14.4);
+    expect(trip.totalDurationMin).toBe(25);
     expect(trip.optimized).toBe(true);
-    const url = String((global.fetch as jest.Mock).mock.calls[0][0]);
-    expect(url).toContain('/trip/v1/driving/73.865600,18.486600;');
-    expect(url).toContain('source=first');
-    expect(url).toContain('roundtrip=false');
+    expect(trip.provider).toBe('google');
+    expect(trip.geometry.length).toBeGreaterThan(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://routes.googleapis.com/directions/v2:computeRoutes');
+    const body = JSON.parse(init.body);
+    expect(body.optimizeWaypointOrder).toBe(true);
+    expect(body.intermediates).toHaveLength(3);
+    expect(body.destination.location.latLng).toEqual({ latitude: hub.lat, longitude: hub.lng });
+    expect(init.headers['X-Goog-FieldMask']).toContain('routes.optimizedIntermediateWaypointIndex');
   });
 
-  it('falls back to nearest-neighbour when the provider fails, and does not cache the fallback', async () => {
+  it('without an end, finishes at the stop farthest from the origin', async () => {
+    const fetchMock = ok({
+      routes: [
+        {
+          distanceMeters: 8000,
+          duration: '900s',
+          optimizedIntermediateWaypointIndex: [1, 0],
+          legs: [
+            { distanceMeters: 2000, duration: '200s' },
+            { distanceMeters: 3000, duration: '300s' },
+            { distanceMeters: 3000, duration: '400s' },
+          ],
+        },
+      ],
+    });
+    global.fetch = fetchMock as never;
+    // Katraj (index 0) is farthest from the hub, so it is the destination; swargate and bibwewadi are waypoints.
+    const trip = await new GooglePlanner('key-123').planTrip(hub, [katraj, bibwewadi, swargate]);
+    expect(trip.order).toEqual([2, 1, 0]);
+    expect(trip.returnLeg).toBeNull();
+    expect(trip.legs).toHaveLength(3);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.destination.location.latLng).toEqual({ latitude: katraj.lat, longitude: katraj.lng });
+    expect(body.intermediates).toHaveLength(2);
+  });
+
+  it('decodes Google polylines', () => {
+    expect(decodePolyline('_p~iF~ps|U_ulLnnqC_mqNvxq`@')).toEqual([
+      { lat: 38.5, lng: -120.2 },
+      { lat: 40.7, lng: -120.95 },
+      { lat: 43.252, lng: -126.453 },
+    ]);
+  });
+
+  it('falls back to nearest-neighbour when Google fails, and does not cache the fallback', async () => {
     const fetchMock = jest.fn().mockRejectedValue(new Error('offline'));
     global.fetch = fetchMock as never;
     const svc = new RoutingService(config);
@@ -67,36 +104,12 @@ describe('routing', () => {
   });
 
   it('caches successful plans for identical inputs', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({ ok: true, json: async () => osrmTrip });
+    const fetchMock = ok(roundTrip);
     global.fetch = fetchMock as never;
     const svc = new RoutingService(config);
-    await svc.planTrip(hub, [katraj, bibwewadi, swargate]);
-    await svc.planTrip(hub, [katraj, bibwewadi, swargate]);
+    await svc.planTrip(hub, [katraj, bibwewadi, swargate], hub);
+    await svc.planTrip(hub, [katraj, bibwewadi, swargate], hub);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('ends the trip at the hub when asked: return leg split off, totals include it', async () => {
-    const roundTrip = {
-      ...osrmTrip,
-      waypoints: [...osrmTrip.waypoints, { waypoint_index: 4, trips_index: 0 }],
-      trips: [
-        {
-          ...osrmTrip.trips[0],
-          distance: 10941 + 3500,
-          duration: 1054 + 420,
-          legs: [...osrmTrip.trips[0].legs, { distance: 3500, duration: 420 }],
-        },
-      ],
-    };
-    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => roundTrip }) as never;
-    const trip = await new OsrmPlanner('https://osrm.example').planTrip(hub, [katraj, bibwewadi, swargate], hub);
-    expect(trip.order).toEqual([2, 1, 0]);
-    expect(trip.legs).toHaveLength(3);
-    expect(trip.returnLeg).toEqual({ distanceKm: 3.5, durationMin: 7 });
-    expect(trip.totalDistanceKm).toBe(14.4);
-    const url = String((global.fetch as jest.Mock).mock.calls[0][0]);
-    expect(url).toContain('destination=last');
-    expect(url.split(';')).toHaveLength(5); // origin, 3 stops, hub
   });
 
   it('fallback also drives back to the hub', () => {
@@ -115,7 +128,7 @@ describe('routing', () => {
     expect(trip.totalDistanceKm).toBeGreaterThan(0);
   });
 
-  it('returns an empty trip without calling the provider when there are no stops', async () => {
+  it('returns an empty trip without calling Google when there are no stops', async () => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock as never;
     const trip = await new RoutingService(config).planTrip(hub, []);

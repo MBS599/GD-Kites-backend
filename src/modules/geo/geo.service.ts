@@ -40,29 +40,18 @@ interface GoogleComponent {
 
 const PLACES_URL = 'https://places.googleapis.com/v1';
 
-interface IndiaPostOffice {
-  Name: string;
-  Pincode: string;
-  District: string;
-}
-
 const CACHE_MAX = 5000;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-/** Nominatim usage policy: at most 1 request per second. */
-const NOMINATIM_SPACING_MS = 1100;
 
 /**
- * Reverse geocoding (coordinates → address). Uses Google Geocoding when
- * GOOGLE_MAPS_API_KEY is set, otherwise OpenStreetMap Nominatim with the
- * policy-required User-Agent and 1 req/s throttle. Results are cached by
- * ~11 m grid cell so repeated lookups never hit the provider.
+ * Google Maps Platform for addresses: Geocoding API for pin → address and Places API
+ * (New) for search. Reverse lookups are cached by ~11 m grid cell so repeated lookups
+ * never hit Google.
  */
 @Injectable()
 export class GeoService {
   private readonly logger = new Logger(GeoService.name);
   private readonly cache = new Map<string, { place: Place; at: number }>();
-  private queue: Promise<unknown> = Promise.resolve();
-  private lastCall = 0;
 
   constructor(private readonly config: AppConfig) {}
 
@@ -73,7 +62,7 @@ export class GeoService {
 
     let place: Place;
     try {
-      place = this.config.get('GOOGLE_MAPS_API_KEY') ? await this.google(lat, lng) : await this.nominatimThrottled(lat, lng);
+      place = await this.google(lat, lng);
     } catch (e) {
       this.logger.warn(`reverse geocode failed for ${key}: ${String(e)}`);
       throw new ServiceUnavailableException('Address lookup is unavailable right now.');
@@ -84,112 +73,8 @@ export class GeoService {
     return place;
   }
 
-  /** Serialises calls so we never exceed Nominatim's rate limit. */
-  private nominatimThrottled(lat: number, lng: number): Promise<Place> {
-    const run = async () => {
-      const wait = this.lastCall + NOMINATIM_SPACING_MS - Date.now();
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      this.lastCall = Date.now();
-      return this.nominatim(lat, lng);
-    };
-    const next = this.queue.then(run, run);
-    this.queue = next.catch(() => undefined);
-    return next;
-  }
-
-  private async nominatim(lat: number, lng: number): Promise<Place> {
-    const url = new URL('/reverse', this.config.get('NOMINATIM_URL'));
-    url.search = new URLSearchParams({
-      format: 'jsonv2',
-      lat: String(lat),
-      lon: String(lng),
-      zoom: '18',
-      addressdetails: '1',
-      'accept-language': 'en',
-    }).toString();
-    const res = await fetch(url, {
-      headers: { 'User-Agent': this.config.get('GEOCODER_USER_AGENT') },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) throw new Error(`Nominatim HTTP ${res.status}`);
-    const body = (await res.json()) as { display_name?: string; error?: string; address?: Record<string, string> };
-    if (body.error || !body.address) throw new Error(body.error ?? 'no address');
-    const a = body.address;
-    const road = a.road ?? a.pedestrian ?? null;
-    const place = a.commercial ?? a.amenity ?? a.shop ?? a.building ?? a.house_name ?? null;
-    const area = a.suburb ?? a.neighbourhood ?? a.quarter ?? a.village ?? a.hamlet ?? a.city_district ?? null;
-    const city = a.city ?? a.town ?? a.village ?? a.municipality ?? a.state_district ?? null;
-    const parts = [place ?? road, area, city].filter((p, i, arr): p is string => !!p && arr.indexOf(p) === i);
-    // OpenStreetMap's Indian PIN codes are often wrong (e.g. 411406 for the Kondhwa shop,
-    // really 411046): the PIN comes from India Post instead, and the OSM one is left out.
-    const full = (body.display_name ?? parts.join(', '))
-      .split(',')
-      .map((x) => x.trim())
-      .filter((x) => x && !/^\d{6}$/.test(x) && x !== 'India')
-      .join(', ');
-    return {
-      label: parts.length ? parts.join(', ') : full.split(',').slice(0, 3).join(',').trim(),
-      full,
-      area,
-      city,
-      pincode: await this.indiaPostPin(a),
-      state: a.state ?? null,
-      houseNumber: a.house_number ?? null,
-      building: place,
-      street: road,
-    };
-  }
-
-  /**
-   * PIN code from India Post's directory (free, no key) for an OpenStreetMap address.
-   * A wrong PIN is worse than none, so only a PIN tied to the locality's name is used:
-   * 1. the post office named like the locality, in the same district (Katraj → 411046);
-   * 2. else OSM's postcode, if India Post lists it for a post office with that name;
-   * 3. else null (the customer types it).
-   */
-  private async indiaPostPin(a: Record<string, string>): Promise<string | null> {
-    const district = (a.state_district ?? a.county ?? a.city ?? '').replace(/\s+district$/i, '').trim().toLowerCase();
-    const inDistrict = (o: IndiaPostOffice) => !district || o.District.toLowerCase().includes(district.split(' ')[0]);
-    const names = [a.suburb, a.neighbourhood, a.quarter, a.village, a.hamlet, a.city_district, a.town]
-      .filter((n): n is string => !!n)
-      .flatMap((n) => [n, n.split(/\s+/)[0]])
-      .filter((n, i, arr) => n.length >= 4 && arr.indexOf(n) === i)
-      .slice(0, 4);
-    const named = (o: IndiaPostOffice) =>
-      names.some((n) => o.Name.toLowerCase().includes(n.toLowerCase()) || n.toLowerCase().includes(o.Name.toLowerCase()));
-    try {
-      for (const name of names) {
-        const offices = (await this.indiaPost(`postoffice/${encodeURIComponent(name)}`)).filter(inDistrict);
-        if (!offices.length) continue;
-        const lower = name.toLowerCase();
-        const best =
-          offices.find((o) => o.Name.toLowerCase() === lower) ??
-          offices.find((o) => o.Name.toLowerCase().startsWith(lower)) ??
-          offices[0];
-        return best.Pincode;
-      }
-      const osm = a.postcode?.replace(/\s/g, '');
-      if (osm && /^[1-9]\d{5}$/.test(osm)) {
-        const offices = await this.indiaPost(`pincode/${osm}`);
-        if (offices.some((o) => inDistrict(o) && named(o))) return osm;
-      }
-    } catch (e) {
-      this.logger.warn(`India Post PIN lookup failed: ${String(e)}`);
-    }
-    return null;
-  }
-
-  private async indiaPost(path: string): Promise<IndiaPostOffice[]> {
-    const res = await fetch(new URL(`/${path}`, this.config.get('INDIA_POST_URL')), {
-      headers: { 'User-Agent': this.config.get('GEOCODER_USER_AGENT') },
-      signal: AbortSignal.timeout(6000),
-    });
-    if (!res.ok) throw new Error(`India Post HTTP ${res.status}`);
-    const body = (await res.json()) as { Status?: string; PostOffice?: IndiaPostOffice[] | null }[];
-    return body[0]?.Status === 'Success' ? (body[0].PostOffice ?? []) : [];
-  }
-
   private async google(lat: number, lng: number): Promise<Place> {
+    if (!this.config.get('GOOGLE_MAPS_API_KEY')) throw new Error('GOOGLE_MAPS_API_KEY is not set');
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
     url.search = new URLSearchParams({
       latlng: `${lat},${lng}`,

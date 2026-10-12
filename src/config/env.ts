@@ -23,19 +23,14 @@ const schema = z
     BOOTSTRAP_ADMIN_EMAILS: csv.transform((l) => l.map((e) => e.toLowerCase())),
     PUBLIC_BASE_URL: z.string().default('http://localhost:3000'),
     CORS_ORIGINS: z.string().default('*'),
-    /** Reverse geocoding: Google is used when a key is set, otherwise OpenStreetMap Nominatim. */
+    /**
+     * Google Maps Platform server key: Geocoding API (pin → address), Places API (New)
+     * (address search) and Routes API (road distance for the delivery charge, driver trips).
+     */
     GOOGLE_MAPS_API_KEY: z.string().default(''),
-    NOMINATIM_URL: z.string().default('https://nominatim.openstreetmap.org'),
-    /** Nominatim policy requires an identifying User-Agent with contact info. */
-    GEOCODER_USER_AGENT: z.string().default('GDKites/1.0 (+https://gdkites.in)'),
-    /** India Post PIN code directory (free, no key): checks/finds PIN codes for addresses. */
-    INDIA_POST_URL: z.string().default('https://api.postalpincode.in'),
     /** Android app updates: the version file CI publishes next to the APK, and the APK's public URL. */
     APP_VERSION_FILE: z.string().default('/var/www/gdkites/website/downloads/version.json'),
     APK_URL: z.string().default('https://gdkites.in/downloads/gd-kites.apk'),
-    /** Road routing / trip optimisation. `osrm` now; `google` reserved for the Routes API later. */
-    ROUTING_PROVIDER: z.enum(['osrm']).default('osrm'),
-    OSRM_URL: z.string().default('https://router.project-osrm.org'),
     /**
      * Message channel. `wwebjs` sends WhatsApp from a linked phone
      * (whatsapp-web.js, unofficial, free); `whatsapp` sends Meta-approved

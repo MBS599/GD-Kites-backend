@@ -74,7 +74,7 @@ Admins control where the business delivers — e.g. launch in **Pune**, later sw
 | `GET/PATCH settings` | admin |
 | `GET geo/reverse?lat&lng` → `{ place: { label, full, area, city, pincode, state } }` | any signed-in |
 
-Reverse geocoding: Google Geocoding when `GOOGLE_MAPS_API_KEY` is set, otherwise OpenStreetMap Nominatim (1 req/s, identifying User-Agent). Results are cached per ~11 m cell for 7 days; provider outages return 503 and the app falls back to showing coordinates. For production volume use Google or a self-hosted Nominatim.
+Reverse geocoding: Google Geocoding API (`GOOGLE_MAPS_API_KEY`); no other map or postal-code provider is used. Results are cached per ~11 m cell for 7 days; outages or a missing key return 503 and the app falls back to showing coordinates.
 | `GET/POST service-areas`, `PATCH service-areas/:id` (edit / `isActive`) | admin |
 | `GET orders?serviceAreaId=`, `GET drivers?serviceAreaId=` | admin |
 
@@ -84,9 +84,9 @@ Reverse geocoding: Google Geocoding when `GOOGLE_MAPS_API_KEY` is set, otherwise
 
 - Start = driver's live position if updated in the last 30 min, else their service area's hub.
 - Deliveries already **out for delivery** stay first; the remaining ones are optimised after them.
-- Solved by the OSRM `trip` service (`ROUTING_PROVIDER=osrm`, `OSRM_URL`): road-following polyline, per-stop road distance and drive time, cumulative arrival minutes, total km/time and total fare.
-- Cached 60 s per identical input; if OSRM is unreachable a nearest-neighbour fallback is returned with `optimized: false`.
-- The public OSRM demo server is for development only — self-host OSRM (India extract) or switch to Google Routes for production. The provider sits behind `RoutePlanner` (`src/modules/routing`), so screens don't change.
+- Solved by the Google Routes API (`computeRoutes` with `optimizeWaypointOrder`, up to 25 stops): road-following polyline, per-stop road distance and drive time, cumulative arrival minutes, total km/time and total fare.
+- Cached 60 s per identical input; if Google is unreachable (or the key is missing) a nearest-neighbour fallback is returned with `optimized: false`.
+- Delivery charges use the same API for the road distance from the hub (`RoadDistanceService`, cached 30 days per ~11 m cell pair), with a straight-line × road-factor estimate as fallback.
 
 ## Messaging: WhatsApp + push notifications
 

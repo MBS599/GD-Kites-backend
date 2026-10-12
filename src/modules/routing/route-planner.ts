@@ -23,7 +23,7 @@ export interface PlannedTrip {
   provider: string;
 }
 
-/** Road routing provider. OSRM today; a Google Routes implementation can be added later. */
+/** Road routing provider (Google Routes); the fallback heuristic below covers outages. */
 export interface RoutePlanner {
   readonly name: string;
   /**

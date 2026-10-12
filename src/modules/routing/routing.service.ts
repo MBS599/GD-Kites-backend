@@ -1,15 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../../config/app-config.service';
-import { OsrmPlanner } from './osrm.planner';
+import { GooglePlanner } from './google.planner';
 import { nearestNeighbourTrip, type LatLng, type PlannedTrip, type RoutePlanner } from './route-planner';
 
 const CACHE_TTL_MS = 60_000;
 const CACHE_MAX = 500;
 
 /**
- * Plans driver trips through the configured provider, with a short cache (the
- * Route tab re-requests often) and a heuristic fallback so drivers always get
- * a usable stop order even if the provider is down.
+ * Plans driver trips with Google Routes, with a short cache (the Route tab
+ * re-requests often) and a heuristic fallback so drivers always get a usable
+ * stop order even if Google is unreachable or the key is missing.
  */
 @Injectable()
 export class RoutingService {
@@ -18,7 +18,7 @@ export class RoutingService {
   private readonly cache = new Map<string, { trip: PlannedTrip; at: number }>();
 
   constructor(config: AppConfig) {
-    this.planner = new OsrmPlanner(config.get('OSRM_URL'));
+    this.planner = new GooglePlanner(config.get('GOOGLE_MAPS_API_KEY'));
   }
 
   /** See {@link RoutePlanner.planTrip}; with no stops there is no trip (and no drive back). */

@@ -1,16 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../../config/app-config.service';
 import { roadDistanceKm } from '../../domain/geo';
+import { computeRoute, km } from './google-routes';
 
 const CACHE_MAX = 20_000;
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
- * Driving distance (km) along real roads, from OSRM's `route` service — what the
+ * Driving distance (km) along real roads, from the Google Routes API — what the
  * delivery charge and the driver's fare are based on. Results are cached per ~11 m
- * cell pair, so the quote, the saved address and the order use one lookup. If the
- * router can't be reached, falls back to the straight-line estimate (× road factor)
- * so checkout never stops.
+ * cell pair, so the quote, the saved address and the order use one lookup. If Google
+ * can't be reached, falls back to the straight-line estimate (× road factor) so
+ * checkout never stops.
  */
 @Injectable()
 export class RoadDistanceService {
@@ -27,11 +28,11 @@ export class RoadDistanceService {
     const running = this.inflight.get(key);
     if (running) return running;
 
-    const job = this.osrm(from, to)
-      .then((km) => {
+    const job = this.google(from, to)
+      .then((d) => {
         if (this.cache.size >= CACHE_MAX) this.cache.delete(this.cache.keys().next().value!);
-        this.cache.set(key, { km, at: Date.now() });
-        return km;
+        this.cache.set(key, { km: d, at: Date.now() });
+        return d;
       })
       .catch((e: unknown) => {
         this.logger.warn(`road distance unavailable, using estimate: ${String(e)}`);
@@ -42,15 +43,14 @@ export class RoadDistanceService {
     return job;
   }
 
-  private async osrm(from: { lat: number; lng: number }, to: { lat: number; lng: number }): Promise<number> {
-    const points = [from, to].map((p) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
-    const url = new URL(`/route/v1/driving/${points}`, this.config.get('OSRM_URL'));
-    url.search = new URLSearchParams({ overview: 'false', alternatives: 'false' }).toString();
-    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    if (!res.ok) throw new Error(`OSRM HTTP ${res.status}`);
-    const body = (await res.json()) as { code: string; routes?: { distance: number }[] };
-    const metres = body.routes?.[0]?.distance;
-    if (body.code !== 'Ok' || metres == null) throw new Error(`OSRM ${body.code}`);
-    return Math.round((metres / 1000) * 10) / 10;
+  private async google(from: { lat: number; lng: number }, to: { lat: number; lng: number }): Promise<number> {
+    const route = await computeRoute(
+      this.config.get('GOOGLE_MAPS_API_KEY'),
+      { origin: from, destination: to },
+      'routes.distanceMeters',
+      6000,
+    );
+    if (route.distanceMeters == null) throw new Error('Google Routes: no distance');
+    return km(route.distanceMeters);
   }
 }
