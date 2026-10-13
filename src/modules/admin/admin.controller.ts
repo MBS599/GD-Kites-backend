@@ -68,8 +68,10 @@ export class AdminController {
 
     const live = { status: { not: 'CANCELLED' as const } };
     const inPeriod = { gte: start, lt: end };
-    const [sales, previousSales, orders, cancelled, completed, delivered, fares, totalSales, pending, awaitingDriver, activeDeliveries] =
+    const [discounts, sales, previousSales, orders, cancelled, completed, delivered, fares, totalSales, pending, awaitingDriver, activeDeliveries] =
       await Promise.all([
+        // Customer offers: rupees taken off the goods of orders placed in the period.
+        this.prisma.order.aggregate({ where: { ...live, placedAt: inPeriod }, _sum: { discount: true } }),
         this.prisma.order.aggregate({ where: { ...live, placedAt: inPeriod }, _sum: { total: true } }),
         this.prisma.order.aggregate({ where: { ...live, placedAt: { gte: prevStart, lt: start } }, _sum: { total: true } }),
         this.prisma.order.count({ where: { ...live, placedAt: inPeriod } }),
@@ -122,6 +124,7 @@ export class AdminController {
     const p = previousSales._sum.total?.toNumber() ?? 0;
     const deliveryCharges = delivered._sum.deliveryCharge?.toNumber() ?? 0;
     const driverFares = fares._sum.fare?.toNumber() ?? 0;
+    const offDiscounts = discounts._sum.discount?.toNumber() ?? 0;
     return {
       stats: {
         period: { from: fromKey, to: toKey },
@@ -134,8 +137,10 @@ export class AdminController {
         deliveryCharges,
         driverFares,
         deliveryEarnings: Math.round((deliveryCharges - driverFares) * 100) / 100,
-        /** Sale price minus cost price of the goods sold in the period. */
-        profit: Number(margin?.profit ?? 0),
+        /** Sale price minus cost price of the goods sold in the period, less offer discounts. */
+        profit: Math.round((Number(margin?.profit ?? 0) - offDiscounts) * 100) / 100,
+        /** Rupees customer offers took off orders placed in the period. */
+        discounts: offDiscounts,
         /** Goods sales the profit covers, and goods sales without a cost price (not in profit). */
         costedSales: Number(margin?.costed ?? 0),
         salesWithoutCost: Number(margin?.uncosted ?? 0),

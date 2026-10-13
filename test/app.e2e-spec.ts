@@ -997,6 +997,75 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('customer offers', () => {
+    it('only the chosen customers see and use an offer; the server works out the discount', async () => {
+      const ganesh = await login('shreeganesh.traders@gmail.com');
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      const ids = [] as string[];
+      try {
+        // Admin only; customers are found by name, shop or mobile.
+        await http.get(`${API}/admin/offers`).set(auth(customer)).expect(403);
+        const found = (await http.get(`${API}/admin/offers/customers`).set(auth(admin)).query({ q: '98220' }).expect(200)).body.customers;
+        expect(found.map((c: any) => c.id)).toContain(customer.user.id);
+        await http.post(`${API}/admin/offers`).set(auth(admin))
+          .send({ title: 'Too much', kind: 'percent', value: 95, customerIds: [customer.user.id] }).expect(400);
+
+        const mine = (await http.post(`${API}/admin/offers`).set(auth(admin)).send({
+          title: 'Diwali 10% off', kind: 'percent', value: 10, maxDiscount: 100, minOrder: 500, customerIds: [customer.user.id],
+        }).expect(201)).body.offer;
+        const theirs = (await http.post(`${API}/admin/offers`).set(auth(admin))
+          .send({ title: 'Ganesh ₹50 off', kind: 'flat', value: 50, customerIds: [ganesh.user.id] }).expect(201)).body.offer;
+        ids.push(mine.id, theirs.id);
+        expect(mine.customers.map((c: any) => c.id)).toEqual([customer.user.id]);
+
+        // 100 × ₹25 = ₹2,500: 10% is ₹250, capped at ₹100.
+        await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 100 }).expect(201);
+        let offers = (await http.get(`${API}/offers`).set(auth(customer)).expect(200)).body.offers;
+        expect(offers.map((o: any) => o.id)).toEqual([mine.id]);
+        expect(offers[0]).toMatchObject({ eligible: true, discount: 100, usesLeft: 1 });
+        expect((await http.get(`${API}/offers`).set(auth(ganesh)).expect(200)).body.offers.map((o: any) => o.id)).toEqual([theirs.id]);
+
+        // Someone else's offer: refused, and the cart is left as it was.
+        await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id, offerId: theirs.id }).expect(404);
+        expect((await http.get(`${API}/cart`).set(auth(customer))).body.cart.itemCount).toBe(1);
+
+        const order = (await http.post(`${API}/orders`).set(auth(customer))
+          .send({ addressId: addresses[0].id, offerId: mine.id }).expect(201)).body.order;
+        expect(order).toMatchObject({ subtotal: 2500, discount: 100, offerTitle: 'Diwali 10% off' });
+        expect(order.total).toBe(2500 - 100 + order.deliveryCharge);
+        expect(order.dueOnDelivery).toBe(order.total);
+
+        // One use per customer: gone from the list and refused at checkout.
+        expect((await http.get(`${API}/offers`).set(auth(customer))).body.offers).toEqual([]);
+        await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 100 }).expect(201);
+        await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id, offerId: mine.id }).expect(409);
+        const admins = (await http.get(`${API}/admin/offers`).set(auth(admin))).body.offers;
+        expect(admins.find((o: any) => o.id === mine.id)).toMatchObject({ usedOrders: 1, discountGiven: 100 });
+
+        // A cancelled order gives the use back.
+        await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
+        offers = (await http.get(`${API}/offers`).set(auth(customer))).body.offers;
+        expect(offers.map((o: any) => o.id)).toEqual([mine.id]);
+
+        // Below the offer's minimum: shown, not usable.
+        await http.patch(`${API}/cart/items/${kite.id}`).set(auth(customer)).send({ qty: 10 }).expect(200);
+        offers = (await http.get(`${API}/offers`).set(auth(customer))).body.offers;
+        expect(offers[0]).toMatchObject({ eligible: false, shortBy: 250, discount: 0 });
+        await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id, offerId: mine.id }).expect(409);
+
+        // Switched off or the customer removed: no longer theirs.
+        await http.patch(`${API}/admin/offers/${mine.id}`).set(auth(admin)).send({ isActive: false }).expect(200);
+        expect((await http.get(`${API}/offers`).set(auth(customer))).body.offers).toEqual([]);
+        await http.patch(`${API}/admin/offers/${mine.id}`).set(auth(admin)).send({ isActive: true, customerIds: [ganesh.user.id] }).expect(200);
+        expect((await http.get(`${API}/offers`).set(auth(customer))).body.offers).toEqual([]);
+      } finally {
+        await http.delete(`${API}/cart/items/${kite.id}`).set(auth(customer));
+        for (const id of ids) await http.delete(`${API}/admin/offers/${id}`).set(auth(admin)).expect(204);
+      }
+    });
+  });
+
   describe('service areas (geofence)', () => {
     const ahmednagarShop = { lat: 19.09, lng: 74.74 };
     const addressBody = { label: 'Branch', area: 'Market', line: 'Shop 2, Main Road', pincode: '414001', ...ahmednagarShop };
@@ -1196,6 +1265,64 @@ describe('GD Kite Center API (e2e)', () => {
   });
 
   describe('admin management', () => {
+    it('categories: admins add (slug made from the name), rename and hide only empty ones', async () => {
+      await http.post(`${API}/categories`).set(auth(customer)).send({ name: 'Nope' }).expect(403);
+      const made = (await http.post(`${API}/categories`).set(auth(admin)).send({ name: 'Paper Kites & More' }).expect(201)).body.category;
+      expect(made.slug).toBe('paperKitesMore');
+      await http.post(`${API}/categories`).set(auth(admin)).send({ name: 'paper kites & more' }).expect(409);
+      await http.patch(`${API}/categories/${made.id}`).set(auth(admin)).send({ name: 'Paper Kites' }).expect(200);
+
+      const all = (await http.get(`${API}/categories?all=true`).set(auth(admin)).expect(200)).body.categories;
+      const fighter = all.find((c: any) => c.slug === 'fighterKites');
+      expect(fighter.products).toBeGreaterThan(0);
+      // Customers never get hidden ones or counts, even when asking.
+      const mine = (await http.get(`${API}/categories?all=true`).set(auth(customer)).expect(200)).body.categories;
+      expect(mine[0].products).toBeUndefined();
+
+      const refused = await http.patch(`${API}/categories/${fighter.id}`).set(auth(admin)).send({ isActive: false }).expect(409);
+      expect(refused.body.error.message).toContain('Move them');
+      await http.patch(`${API}/categories/${made.id}`).set(auth(admin)).send({ isActive: false }).expect(200);
+      expect((await http.get(`${API}/categories`).set(auth(customer))).body.categories.some((c: any) => c.id === made.id)).toBe(false);
+      // A new category with the same name later gets its own slug.
+      await prisma.category.update({ where: { id: made.id }, data: { name: 'Old paper' } });
+      const again = (await http.post(`${API}/categories`).set(auth(admin)).send({ name: 'Paper Kites More' }).expect(201)).body.category;
+      expect(again.slug).toBe('paperKitesMore2');
+      await prisma.category.deleteMany({ where: { id: { in: [made.id, again.id] } } });
+    });
+
+    it('drivers: removed only without open deliveries; signed out, blocked, and can be added again', async () => {
+      const email = 'leaving.driver@example.com';
+      const created = (await http.post(`${API}/drivers`).set(auth(admin))
+        .send({ name: 'Leaving Driver', email, phone: '+91 97000 11223', type: 'external', vehicleNumber: 'MH12 LV 0001' }).expect(201)).body.driver;
+      const s = await login(email);
+
+      // An open delivery blocks removal.
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 10 }).expect(201);
+      const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id }).expect(201)).body.order;
+      await http.post(`${API}/orders/${order.id}/confirm`).set(auth(admin)).expect(200);
+      await prisma.driverProfile.update({ where: { id: created.id }, data: { availability: 'AVAILABLE' } });
+      await http.post(`${API}/orders/${order.id}/assign`).set(auth(admin)).send({ driverId: created.id }).expect(200);
+      await http.delete(`${API}/drivers/${created.id}`).set(auth(customer)).expect(403);
+      expect((await http.delete(`${API}/drivers/${created.id}`).set(auth(admin)).expect(409)).body.error.message).toContain('open delivery');
+      await http.post(`${API}/orders/${order.id}/reject`).set(auth(admin)).send({ reason: 'Test over' }).expect(200);
+
+      await http.delete(`${API}/drivers/${created.id}`).set(auth(admin)).expect(204);
+      await http.get(`${API}/deliveries`).set(auth(s)).expect(401);
+      await http.post(`${API}/auth/refresh`).send({ refreshToken: s.refreshToken }).expect(401);
+      const list = (await http.get(`${API}/drivers`).set(auth(admin))).body.drivers;
+      expect(list.some((d: any) => d.id === created.id)).toBe(false);
+      await http.delete(`${API}/drivers/${created.id}`).set(auth(admin)).expect(404);
+
+      // Back again with the same email: same profile, active.
+      const back = (await http.post(`${API}/drivers`).set(auth(admin))
+        .send({ name: 'Leaving Driver', email, phone: '+91 97000 11223', type: 'gd', vehicleNumber: 'MH12 LV 0002' }).expect(201)).body.driver;
+      expect(back.id).toBe(created.id);
+      expect(back.vehicleNumber).toBe('MH12 LV 0002');
+      await http.delete(`${API}/drivers/${created.id}`).set(auth(admin)).expect(204);
+    });
+
     it('creates, updates and soft-deletes a product', async () => {
       const created = await http
         .post(`${API}/products`)

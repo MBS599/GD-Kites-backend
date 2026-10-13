@@ -177,8 +177,26 @@ export class DriversService {
     const driver = await this.prisma.tx(async (tx) => {
       const existing = await tx.user.findUnique({ where: { email }, include: { driverProfile: true } });
       if (existing?.role === 'ADMIN') throw new ConflictException('This email belongs to an admin account.');
-      if (existing?.driverProfile) throw new ConflictException('This person is already registered as a driver.');
+      // A removed driver can be added again: their account and history come back.
+      const returning = existing?.role === 'DRIVER' && existing.driverProfile && !existing.driverProfile.isActive;
+      if (existing?.driverProfile && !returning) throw new ConflictException('This person is already registered as a driver.');
       if (await phoneInUse(this.prisma, input.phone, existing?.id)) throw new ConflictException(PHONE_TAKEN);
+      if (returning) {
+        await tx.user.update({ where: { id: existing.id }, data: { isActive: true, name: input.name.trim(), phone: input.phone } });
+        return tx.driverProfile.update({
+          where: { id: existing.driverProfile!.id },
+          data: {
+            isActive: true,
+            availability: 'OFFLINE',
+            type: input.type,
+            vehicleNumber: input.vehicleNumber.trim().toUpperCase(),
+            serviceAreaId: area?.id ?? null,
+            vehicleTypeId: vehicle?.id ?? null,
+            hub: area?.hubName ?? 'Hub',
+          },
+          include: driverInclude,
+        });
+      }
       const user = existing
         ? await tx.user.update({ where: { id: existing.id }, data: { role: 'DRIVER', phone: input.phone } })
         : await tx.user.create({ data: { email, name: input.name.trim(), phone: input.phone, role: 'DRIVER' } });
@@ -230,6 +248,39 @@ export class DriversService {
     this.realtime.driverUpdated(driver);
     const [out] = await this.withCounts([driver]);
     return out;
+  }
+
+  /**
+   * Admin removes a driver who no longer works with the shop: they are signed out everywhere,
+   * can't sign in and leave the driver lists. Past deliveries and fares stay in the reports.
+   * Open deliveries must be finished or reassigned first. They can be added again later.
+   */
+  async remove(id: string) {
+    const existing = await this.prisma.driverProfile.findUnique({ where: { id }, include: { user: true } });
+    if (!existing || !existing.isActive) throw new NotFoundException('Driver not found.');
+    const open = await this.prisma.delivery.count({ where: { driverId: id, status: { in: ['ASSIGNED', 'IN_TRANSIT'] } } });
+    if (open > 0) {
+      throw new ConflictException(
+        `${existing.user.name} has ${open} open ${open === 1 ? 'delivery' : 'deliveries'}. Reassign or finish ${open === 1 ? 'it' : 'them'} first.`,
+      );
+    }
+    // An admin who also delivers keeps their admin account; only the driver part ends.
+    const closeAccount = existing.user.role === 'DRIVER';
+    const [driver] = await this.prisma.$transaction([
+      this.prisma.driverProfile.update({
+        where: { id },
+        data: { isActive: false, availability: 'OFFLINE', lastLat: null, lastLng: null, lastLocationAt: null },
+        include: driverInclude,
+      }),
+      ...(closeAccount
+        ? [
+            this.prisma.user.update({ where: { id: existing.userId }, data: { isActive: false } }),
+            this.prisma.refreshToken.updateMany({ where: { userId: existing.userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+            this.prisma.deviceToken.deleteMany({ where: { userId: existing.userId } }),
+          ]
+        : []),
+    ]);
+    this.realtime.driverUpdated(driver);
   }
 
   /** The admin stops delivering. Open deliveries must be finished or reassigned first. */

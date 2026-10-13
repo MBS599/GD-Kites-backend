@@ -18,6 +18,8 @@ import { DeliveriesService } from './deliveries/deliveries.service';
 import { DriversController } from './drivers/drivers.controller';
 import { DriversService } from './drivers/drivers.service';
 import { VehicleTypesController } from './drivers/vehicle-types.controller';
+import { OffersAdminController, OffersController } from './offers/offers.controller';
+import { OffersService } from './offers/offers.service';
 import { OrdersController } from './orders/orders.controller';
 import { OrdersService } from './orders/orders.service';
 import { DispatchController } from './orders/dispatch.controller';
@@ -95,10 +97,19 @@ export class CatalogModule {}
 @Module({ controllers: [CartController], providers: [CartService] })
 export class CartModule {}
 
-/** Orders, checkout and tracking. */
+/** Orders, checkout (with customer offers) and tracking. */
 @Module({
-  controllers: [OrdersController, DispatchController, PaymentsController, PaymentsAdminController, MyPaymentsController, RazorpayWebhookController],
-  providers: [OrdersService, DispatchService, RoutingService, PaymentsService, RazorpayClient],
+  controllers: [
+    OrdersController,
+    DispatchController,
+    PaymentsController,
+    PaymentsAdminController,
+    MyPaymentsController,
+    RazorpayWebhookController,
+    OffersController,
+    OffersAdminController,
+  ],
+  providers: [OrdersService, DispatchService, RoutingService, PaymentsService, RazorpayClient, OffersService],
 })
 export class OrdersModule {}
 

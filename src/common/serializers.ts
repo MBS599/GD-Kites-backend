@@ -349,6 +349,9 @@ export function orderOut(o: FullOrder, { driverLocation = false }: { driverLocat
       contents: i.contents,
     })),
     subtotal: m(o.subtotal),
+    /** Customer offer: rupees off the goods (in total) and the offer's title at order time. */
+    discount: m(o.discount),
+    offerTitle: o.offerTitle,
     deliveryCharge: m(o.deliveryCharge),
     /** 'courier': dropped at a courier office (packing charge, no delivery charge, paid online). */
     deliveryMode: o.deliveryMode === 'COURIER' ? 'courier' : 'local',

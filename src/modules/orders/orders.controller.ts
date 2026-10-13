@@ -33,6 +33,8 @@ export class OrderListQuery {
 export class PlaceOrderDto {
   /** Saved address to deliver to. Items come from the server-side cart. */
   @IsUUID() addressId: string;
+  /** One of the customer's offers (GET /offers). The discount is worked out on the server. */
+  @IsOptional() @IsUUID() offerId?: string;
 }
 
 export class AssignDriverDto {
@@ -74,7 +76,7 @@ export class OrdersController {
   @Post()
   async place(@CurrentUser() user: AuthUser, @Body() dto: PlaceOrderDto) {
     // checkout: open Razorpay Checkout with it (null when nothing is paid online).
-    return this.orders.place(user, dto.addressId);
+    return this.orders.place(user, dto.addressId, dto.offerId);
   }
 
   @Roles('CUSTOMER')

@@ -21,6 +21,7 @@ import { ServiceAreasService } from '../service-areas/service-areas.service';
 import { assertTransition, moveOrder, refreshDriverAvailability } from './order-workflow';
 import { PaymentsService, type CheckoutSession } from '../payments/payments.service';
 import { SettingsService } from '../settings/settings.controller';
+import { OffersService } from '../offers/offers.service';
 
 @Injectable()
 export class OrdersService {
@@ -32,6 +33,7 @@ export class OrdersService {
     private readonly otp: OtpGenerator,
     private readonly payments: PaymentsService,
     private readonly settings: SettingsService,
+    private readonly offers: OffersService,
   ) {}
 
   private load(id: string) {
@@ -178,8 +180,9 @@ export class OrdersService {
    * Places an order from the customer's server-side cart in one transaction:
    * checks every product is in stock and the minimum order value, snapshots
    * prices + address (product names include the size), then empties the cart.
+   * [offerId]: one of the customer's offers; its discount comes off the goods (cash part).
    */
-  async place(customer: AuthUser, addressId: string) {
+  async place(customer: AuthUser, addressId: string, offerId?: string) {
     let awaiting = false;
     // Look up the road distance before the transaction (a router call inside it could
     // outlast the transaction timeout); inside, the same lookup comes from the cache.
@@ -235,6 +238,10 @@ export class OrdersService {
         });
       }
 
+      // Customer offer: checked and worked out here, never taken from the app.
+      const applied = offerId ? await this.offers.applyAtCheckout(tx, customer.id, offerId, subtotal) : null;
+      const discount = applied?.discount ?? new Prisma.Decimal(0);
+
       // Courier drop-off: no delivery charge, only the packing charge (settings master), and
       // the whole order is paid online (no one pays the driver at the courier office).
       const courier = address.kind === 'COURIER';
@@ -264,10 +271,13 @@ export class OrdersService {
           addressId: address.id,
           serviceAreaId: coverage.area.id,
           subtotal,
+          discount,
+          offerId: applied?.offer.id ?? null,
+          offerTitle: applied?.offer.title ?? null,
           deliveryCharge,
           deliveryTax,
           paymentFee,
-          total: subtotal.add(deliveryCharge).add(deliveryTax).add(paymentFee).add(packingCharge),
+          total: subtotal.sub(discount).add(deliveryCharge).add(deliveryTax).add(paymentFee).add(packingCharge),
           deliveryMode: courier ? 'COURIER' : 'LOCAL',
           packingCharge,
           courierName: courier ? address.courierName : null,

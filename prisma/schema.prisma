@@ -58,34 +58,35 @@ enum PaymentStatus {
 }
 
 model User {
-  id                  String         @id @default(uuid())
+  id                  String          @id @default(uuid())
   /// Null for accounts created by mobile-number (OTP) sign-in until the customer adds one.
-  email               String?        @unique
+  email               String?         @unique
   /// The customer typed the email in themselves (not proven by Google). Google
   /// sign-in never links to such an account; the real owner gets their own.
-  emailUnverified     Boolean        @default(false)
+  emailUnverified     Boolean         @default(false)
   name                String
   phone               String?
   /// Mobile number proven by OTP, normalised (919822011122). Used for OTP sign-in.
-  phoneVerified       String?        @unique
+  phoneVerified       String?         @unique
   businessName        String?
   photoUrl            String?
   /// Last time the user opened their notifications: later order updates count as unread.
   notificationsSeenAt DateTime?
-  googleSub           String?        @unique
+  googleSub           String?         @unique
   /// Assigned server-side only. Public Google sign-up always creates CUSTOMER.
-  role                Role           @default(CUSTOMER)
-  isActive            Boolean        @default(true)
+  role                Role            @default(CUSTOMER)
+  isActive            Boolean         @default(true)
   /// Transactional SMS updates (order status, assignments). User can turn off.
-  smsEnabled          Boolean        @default(true)
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
+  smsEnabled          Boolean         @default(true)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
   driverProfile       DriverProfile?
   addresses           Address[]
   cart                Cart?
-  orders              Order[]        @relation("CustomerOrders")
+  orders              Order[]         @relation("CustomerOrders")
   refreshTokens       RefreshToken[]
   devices             DeviceToken[]
+  offers              OfferCustomer[]
 
   @@index([role])
 }
@@ -383,6 +384,11 @@ model Order {
   rejectionReason  String?
   placedAt         DateTime             @default(now())
   deliveredAt      DateTime?
+  /// Offer applied at checkout (snapshot of its title) and the rupees it took off the goods.
+  offerId          String?
+  offer            Offer?               @relation(fields: [offerId], references: [id], onDelete: SetNull)
+  offerTitle       String?
+  discount         Decimal              @default(0) @db.Decimal(10, 2)
   updatedAt        DateTime             @updatedAt
   items            OrderItem[]
   history          OrderStatusHistory[]
@@ -393,6 +399,7 @@ model Order {
   @@index([status, placedAt])
   @@index([serviceAreaId, status])
   @@index([deliveredAt])
+  @@index([offerId, customerId])
 }
 
 model OrderItem {
@@ -568,4 +575,44 @@ model Payment {
 
   @@index([orderId])
   @@index([status])
+}
+
+enum OfferKind {
+  PERCENT
+  FLAT
+}
+
+/// A discount on the goods that only the customers the admin picked can use.
+model Offer {
+  id              String          @id @default(uuid())
+  title           String
+  description     String?
+  kind            OfferKind
+  /// PERCENT: % off the goods; FLAT: rupees off.
+  value           Decimal         @db.Decimal(10, 2)
+  /// PERCENT only: most rupees it can take off (null = no cap).
+  maxDiscount     Decimal?        @db.Decimal(10, 2)
+  /// Goods subtotal needed to use it (0 = any order).
+  minOrder        Decimal         @default(0) @db.Decimal(12, 2)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  /// Orders each customer can use it on (cancelled orders give the use back).
+  usesPerCustomer Int             @default(1)
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  customers       OfferCustomer[]
+  orders          Order[]
+}
+
+/// Who may use an offer.
+model OfferCustomer {
+  offerId   String
+  offer     Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([offerId, userId])
+  @@index([userId])
 }

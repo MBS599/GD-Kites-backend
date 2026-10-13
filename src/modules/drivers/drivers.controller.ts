@@ -175,6 +175,14 @@ export class DriversController {
     return { driver: await this.drivers.setServiceArea(id, dto.serviceAreaId) };
   }
 
+  /** Removes a driver (no open deliveries). History stays; they can be added again with the same email. */
+  @Roles('ADMIN')
+  @Delete(':id')
+  @HttpCode(204)
+  async remove(@Param('id', ParseUUIDPipe) id: string) {
+    await this.drivers.remove(id);
+  }
+
   @Roles('ADMIN')
   @Post()
   async create(@Body() dto: CreateDriverDto) {
