@@ -1,0 +1,16 @@
+{
+  "name": "Retailer Combo - 12 Jhalar Kites + 6 Plastic Charkha (Demo)",
+  "category": "designerKites",
+  "price": 199,
+  "description": "A ready-made pack for retail shops: 12 Jhalar 27.5-inch kites and 6 plastic charkhas, priced as one combo. Stock it as it is and resell piece by piece.",
+  "highlights": [
+    "12 Jhalar 27.5-inch kites",
+    "6 plastic charkhas",
+    "One price for the whole pack - less than buying separately",
+    "Ready to resell in your shop"
+  ],
+  "items": [
+    { "name": "Jhalar 27.5 inch", "price": 5.5, "qty": 12 },
+    { "name": "Plastic Charkha", "price": 25, "qty": 6 }
+  ]
+}
