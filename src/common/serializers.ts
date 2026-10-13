@@ -164,7 +164,7 @@ export function userOut(u: UserWithDriver) {
 }
 
 export function categoryOut(c: Category) {
-  return { id: c.id, slug: c.slug, name: c.name, sortOrder: c.sortOrder };
+  return { id: c.id, slug: c.slug, name: c.name, sortOrder: c.sortOrder, isActive: c.isActive };
 }
 
 type MediaItem = { type: 'image' | 'video'; url: string };

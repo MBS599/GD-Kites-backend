@@ -53,7 +53,7 @@ export class CategoriesController {
     return {
       categories: list.map((c) => ({
         ...categoryOut(c),
-        ...(all ? { isActive: c.isActive, products: c._count.products } : {}),
+        ...(all ? { products: c._count.products } : {}),
       })),
     };
   }
