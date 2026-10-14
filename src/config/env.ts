@@ -22,6 +22,13 @@ const schema = z
     GOOGLE_CLIENT_ID: csv,
     BOOTSTRAP_ADMIN_EMAILS: csv.transform((l) => l.map((e) => e.toLowerCase())),
     PUBLIC_BASE_URL: z.string().default('http://localhost:3000'),
+    /**
+     * Store review sign-in (Google Play / App Store reviewers can't receive SMS): this one
+     * mobile number signs in with REVIEW_LOGIN_CODE instead of a sent code. Customer accounts
+     * only. Set both or neither; leave empty when no review is pending.
+     */
+    REVIEW_LOGIN_PHONE: z.string().default(''),
+    REVIEW_LOGIN_CODE: z.string().regex(/^(\d{6})?$/, 'REVIEW_LOGIN_CODE must be 6 digits').default(''),
     CORS_ORIGINS: z.string().default('*'),
     /**
      * Google Maps Platform server key: Geocoding API (pin → address), Places API (New)
@@ -78,6 +85,9 @@ const schema = z
   })
   .refine((e) => e.JWT_ACCESS_SECRET !== e.JWT_REFRESH_SECRET, {
     message: 'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ',
+  })
+  .refine((e) => !e.REVIEW_LOGIN_PHONE === !e.REVIEW_LOGIN_CODE, {
+    message: 'Set both REVIEW_LOGIN_PHONE and REVIEW_LOGIN_CODE, or neither',
   })
   .refine((e) => e.PAYMENTS_PROVIDER !== 'razorpay' || (!!e.RAZORPAY_KEY_ID && !!e.RAZORPAY_KEY_SECRET), {
     message: 'RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required when PAYMENTS_PROVIDER is razorpay',

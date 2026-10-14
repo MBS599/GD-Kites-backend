@@ -62,6 +62,12 @@ export class PhoneOtpService {
     return hashOtp(this.config.get('JWT_ACCESS_SECRET'), phone, code);
   }
 
+  /** The store-review number (normalised), when review sign-in is set up on the server. */
+  private get reviewPhone() {
+    const raw = this.config.get('REVIEW_LOGIN_PHONE');
+    return raw ? normalizeIndianMobile(raw) : null;
+  }
+
   private phone(raw: string) {
     const phone = normalizeIndianMobile(raw);
     if (!phone) throw new BadRequestException('Enter a valid 10-digit Indian mobile number.');
@@ -85,13 +91,15 @@ export class PhoneOtpService {
       throw tooMany('Too many codes requested for this number. Try again in an hour.', 3600);
     }
 
-    const code = this.otp.code(LOGIN_OTP.digits);
+    // Store reviewers can't receive SMS: their number uses the fixed code from the server config.
+    const review = phone === this.reviewPhone;
+    const code = review ? this.config.get('REVIEW_LOGIN_CODE') : this.otp.code(LOGIN_OTP.digits);
     // Older unused codes stop working as soon as a new one is issued.
     await this.prisma.otpChallenge.updateMany({ where: { phone, consumedAt: null }, data: { consumedAt: new Date() } });
     await this.prisma.otpChallenge.create({
       data: { phone, codeHash: this.hash(phone, code), expiresAt: new Date(now + LOGIN_OTP.ttlMs) },
     });
-    const status = await this.sms.loginOtp(phone, code);
+    const status = review ? 'SENT' : await this.sms.loginOtp(phone, code);
     if (status === 'FAILED' || status === 'SKIPPED') {
       throw new ServiceUnavailableException('Could not send the SMS right now. Please try again or sign in with Google.');
     }
@@ -111,6 +119,9 @@ export class PhoneOtpService {
     const challenge = await this.check(phone, code);
 
     const existing = await this.findAccount(phone);
+    if (phone === this.reviewPhone && existing && existing.role !== 'CUSTOMER') {
+      throw new ForbiddenException('This number can only sign in as a customer.');
+    }
     if (existing) {
       if (existing.role === 'ADMIN') throw new ForbiddenException('Admin accounts sign in with Google.');
       if (!existing.isActive) throw new ForbiddenException('This account has been deactivated.');

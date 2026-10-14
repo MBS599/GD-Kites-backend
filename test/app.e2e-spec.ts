@@ -12,7 +12,7 @@ import { GoogleVerifier } from '../src/modules/auth/google-verifier.service';
 import { GeoService } from '../src/modules/geo/geo.service';
 import { RoadDistanceService } from '../src/modules/routing/road-distance.service';
 import { roadDistanceKm } from '../src/domain/geo';
-import { OtpGenerator } from '../src/modules/sms/otp';
+import { hashOtp, OtpGenerator } from '../src/modules/sms/otp';
 import { SmsService } from '../src/modules/sms/sms.service';
 import { PushService } from '../src/modules/sms/push.service';
 import { createHmac } from 'node:crypto';
@@ -1265,6 +1265,33 @@ describe('GD Kite Center API (e2e)', () => {
   });
 
   describe('admin management', () => {
+    // Here, not under authentication: the sign-in rate limit (5 a minute) is used up there.
+    it('store review number signs in with the fixed code, gets no SMS, and only as a customer', async () => {
+      // The reviewer's phone is its own client (own sign-in rate limit).
+      const reviewer = { 'X-Forwarded-For': '203.0.113.7' };
+      await prisma.otpChallenge.deleteMany({});
+      await http.post(`${API}/auth/otp/request`).set(reviewer).send({ phone: '95550 00111' }).expect(200);
+      expect(await prisma.smsMessage.count({ where: { event: 'loginOtp', to: '919555000111' } })).toBe(0);
+      await http.post(`${API}/auth/otp/verify`).set(reviewer).send({ phone: '9555000111', code: '123456', name: 'Play Review' }).expect(400);
+      const s = (await http.post(`${API}/auth/otp/verify`).set(reviewer).send({ phone: '9555000111', code: '424242', name: 'Play Review' }).expect(200)).body;
+      expect(s.user.role).toBe('customer');
+
+      // Pointed at a driver's number by mistake: it never signs in as that driver.
+      const rahul = await prisma.user.findFirstOrThrow({ where: { email: 'rahul.patil@gdkitecenter.in' } });
+      await prisma.user.update({ where: { id: s.user.id }, data: { phoneVerified: null, phone: null } });
+      await prisma.user.update({ where: { id: rahul.id }, data: { phoneVerified: '919555000111' } });
+      try {
+        // (Code created directly: another request would trip the sign-in rate limit for later tests.)
+        await prisma.otpChallenge.deleteMany({});
+        await prisma.otpChallenge.create({
+          data: { phone: '919555000111', codeHash: hashOtp(process.env.JWT_ACCESS_SECRET!, '919555000111', '424242'), expiresAt: new Date(Date.now() + 60_000) },
+        });
+        await http.post(`${API}/auth/otp/verify`).send({ phone: '9555000111', code: '424242' }).expect(403);
+      } finally {
+        await prisma.user.update({ where: { id: rahul.id }, data: { phoneVerified: rahul.phoneVerified } });
+      }
+    });
+
     it('categories: admins add (slug made from the name), rename and hide only empty ones', async () => {
       await http.post(`${API}/categories`).set(auth(customer)).send({ name: 'Nope' }).expect(403);
       const made = (await http.post(`${API}/categories`).set(auth(admin)).send({ name: 'Paper Kites & More' }).expect(201)).body.category;

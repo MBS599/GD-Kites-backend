@@ -18,6 +18,9 @@ process.env.WHATSAPP_APP_SECRET = 'test-app-secret';
 process.env.WHATSAPP_VERIFY_TOKEN = 'test-verify-token';
 // Online payments are switched on per test (Razorpay itself is faked); these only sign test payloads.
 process.env.PAYMENTS_PROVIDER = 'none';
+// Store review sign-in: this number signs in with a fixed code and gets no SMS.
+process.env.REVIEW_LOGIN_PHONE = '9555000111';
+process.env.REVIEW_LOGIN_CODE = '424242';
 process.env.RAZORPAY_KEY_ID = 'rzp_test_e2e';
 process.env.RAZORPAY_KEY_SECRET = 'rzp-test-secret';
 process.env.RAZORPAY_WEBHOOK_SECRET = 'rzp-webhook-secret';
