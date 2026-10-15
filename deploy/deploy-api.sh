@@ -14,6 +14,15 @@ API=/srv/gdkites/api
 NEXT=/srv/gdkites/api.next
 PREV=/srv/gdkites/api.prev
 
+# A deploy cancelled in CI keeps running here (no terminal, so no hang-up signal): stop any
+# leftover install/build in api.next so it can't collide with this one.
+for pid in $(pgrep -u gdkites || true); do
+  case "$(readlink "/proc/$pid/cwd" 2>/dev/null)" in
+    "$NEXT"|"$NEXT"/*) kill -9 "$pid" 2>/dev/null || true ;;
+  esac
+done
+sleep 1
+
 rm -rf "$NEXT"
 mkdir -p "$NEXT"
 tar -xzf "$ARCHIVE" -C "$NEXT"
@@ -26,10 +35,16 @@ sudo -u gdkites -H bash -c "
   set -euo pipefail
   set -a; . /etc/gdkites/api.env; set +a
   cd $NEXT
-  npm ci --include=dev --no-audit --no-fund   # build + migrations need the dev tools
-  npx prisma generate
-  npm run build
-  npx prisma migrate deploy
+  # whatsapp-web.js pulls in Puppeteer, whose install step downloads a ~150 MB Chrome and can
+  # stall for good. Install without it, then make sure Chrome is in the gdkites user's cache as
+  # its own time-limited step (a no-op when the same version is already there).
+  export PUPPETEER_SKIP_DOWNLOAD=true
+  timeout 600 npm ci --include=dev --no-audit --no-fund   # build + migrations need the dev tools
+  timeout 300 npx --no-install puppeteer browsers install chrome >/dev/null ||
+    echo 'warning: Chrome for the WhatsApp sender could not be installed now; the API still deploys' >&2
+  timeout 300 npx prisma generate
+  timeout 600 npm run build
+  timeout 300 npx prisma migrate deploy
 "
 
 healthy() {
