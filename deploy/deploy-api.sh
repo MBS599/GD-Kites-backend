@@ -72,4 +72,4 @@ if ! healthy; then
   fi
   exit 1
 fi
-systemctl --no-pager --lines=0 status gdkites-api | head -3
+echo "gdkites-api: $(systemctl is-active gdkites-api) since $(systemctl show -p ActiveEnterTimestamp --value gdkites-api)"
