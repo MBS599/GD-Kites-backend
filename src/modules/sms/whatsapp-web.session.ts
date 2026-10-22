@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { resolve } from 'node:path';
+import { readdir, rm } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { toDataURL } from 'qrcode';
 import { AppConfig } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -77,8 +78,10 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
   /** Overridable in tests. */
   protected async createClient(): Promise<WebClient> {
     const { Client, LocalAuth } = await import('whatsapp-web.js');
+    const dataPath = resolve(this.config.get('WWEBJS_SESSION_DIR'));
+    await clearStaleChromeLocks(dataPath);
     return new Client({
-      authStrategy: new LocalAuth({ dataPath: resolve(this.config.get('WWEBJS_SESSION_DIR')) }),
+      authStrategy: new LocalAuth({ dataPath }),
       puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] },
     }) as unknown as WebClient;
   }
@@ -280,5 +283,21 @@ export class WebNotReadyError extends Error {}
 export class NotOnWhatsAppError extends Error {
   constructor() {
     super('This number is not on WhatsApp.');
+  }
+}
+
+/**
+ * Chrome refuses to open a profile whose lock files name another machine or a process that
+ * is gone (exit code 21: after a server move from a snapshot, or a crash). The previous client
+ * is always destroyed before a new one starts, so leftover locks here are stale: remove them.
+ * The WhatsApp login itself (the rest of the profile) is kept.
+ */
+async function clearStaleChromeLocks(dataPath: string) {
+  const sessions = await readdir(dataPath, { withFileTypes: true }).catch(() => []);
+  for (const dir of sessions) {
+    if (!dir.isDirectory() || !dir.name.startsWith('session')) continue;
+    for (const lock of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+      await rm(join(dataPath, dir.name, lock), { force: true }).catch(() => undefined);
+    }
   }
 }
