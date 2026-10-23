@@ -1,21 +1,29 @@
 import { Body, ConflictException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsString, Matches, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 import { Prisma } from '@prisma/client';
 import { CurrentUser, Roles, type AuthUser } from '../../common/auth.decorators';
 import { categoryOut } from '../../common/serializers';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 
+/** Home tile pictures and colour sets the app can draw (null = the app's default). */
+export const CATEGORY_ICONS = ['kite', 'firki', 'accessories', 'combo'] as const;
+export const CATEGORY_COLORS = ['yellow', 'sky', 'red', 'ink', 'pink', 'orange', 'violet'] as const;
+
 export class CreateCategoryDto {
   /** lowerCamelCase identifier, e.g. "fighterKites". Made from the name when left out. */
   @IsOptional() @Matches(/^[a-z][a-zA-Z0-9]{1,40}$/, { message: 'Slug must be lowerCamelCase letters/digits.' }) slug?: string;
   @IsString() @MinLength(2) @MaxLength(40) name: string;
   @IsOptional() @IsInt() @Min(0) sortOrder?: number;
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsIn(CATEGORY_ICONS) icon?: string | null;
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsIn(CATEGORY_COLORS) color?: string | null;
 }
 
 export class UpdateCategoryDto {
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsIn(CATEGORY_ICONS) icon?: string | null;
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsIn(CATEGORY_COLORS) color?: string | null;
   @IsOptional() @IsString() @MinLength(2) @MaxLength(40) name?: string;
   @IsOptional() @IsInt() @Min(0) sortOrder?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
@@ -70,7 +78,7 @@ export class CategoriesController {
     for (let n = 2; !dto.slug && (await this.prisma.category.findUnique({ where: { slug } })); n++) slug = `${slugFromName(name)}${n}`;
     const last = await this.prisma.category.aggregate({ _max: { sortOrder: true } });
     const c = await this.prisma.category.create({
-      data: { slug, name, sortOrder: dto.sortOrder ?? (last._max.sortOrder ?? -1) + 1 },
+      data: { slug, name, sortOrder: dto.sortOrder ?? (last._max.sortOrder ?? -1) + 1, icon: dto.icon ?? null, color: dto.color ?? null },
     });
     this.realtime.catalogUpdated('');
     return { category: categoryOut(c) };
@@ -94,7 +102,7 @@ export class CategoriesController {
     if (name && (await this.prisma.category.findFirst({ where: { id: { not: id }, name: { equals: name, mode: 'insensitive' } } }))) {
       throw new ConflictException('A category with this name already exists.');
     }
-    const data: Prisma.CategoryUpdateInput = { name, sortOrder: dto.sortOrder, isActive: dto.isActive };
+    const data: Prisma.CategoryUpdateInput = { name, sortOrder: dto.sortOrder, isActive: dto.isActive, icon: dto.icon, color: dto.color };
     const c = await this.prisma.category.update({ where: { id }, data });
     this.realtime.catalogUpdated('');
     return { category: categoryOut(c) };

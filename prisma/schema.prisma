@@ -240,6 +240,9 @@ model Category {
   name      String
   sortOrder Int       @default(0)
   isActive  Boolean   @default(true)
+  /// Home tile picture (kite, firki, accessories, combo) and colour set; null = the app's default.
+  icon      String?
+  color     String?
   products  Product[]
 }
 
