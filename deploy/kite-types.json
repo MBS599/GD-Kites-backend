@@ -1,0 +1,406 @@
+[
+  {
+    "name": "Addhi",
+    "category": "fighterKites",
+    "price": 7.5,
+    "description": "* पेपर अद्धी साइज (मीडियम) पतंग \n* दुकानदारी के लिए अच्छी पतंग \n* ४-६ डिजाइन में उपलब्ध\n* १२ रूपये से लेकर १५ रुपए तक बेचने के लिए अच्छी पतंग\n* छोटे बच्चों से लेकर बड़े बच्चों की पसंदिता पतंग",
+    "highlights": [],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Paper kite"
+      },
+      {
+        "label": "Design",
+        "value": "Assorted"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Addhi Chil Cut",
+    "category": "fighterKites",
+    "price": 9.2,
+    "description": "* चिल-कट पतंग मीडियम साइज में \n* फाइटर काईट \n* पतंगबाजी के लिए अच्छी पतंग\n*अच्छी क्वालिटी \n* दो से चार कलर में उपलब्ध (मुख्यतः प्लेन)\n* १५ रूपये से लेकर २५ रूपये तक बेचने के लिए अच्छी पतंग",
+    "highlights": [
+      "यह पतंग साइड से कर्व होती है"
+    ],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Paper kite"
+      },
+      {
+        "label": "Size",
+        "value": "Addhi"
+      },
+      {
+        "label": "Cut",
+        "value": "Chil"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Cartoon Print",
+    "category": "designerKites",
+    "price": 2.5,
+    "description": "* २४ इंच की पतंग \n* प्लास्टिक कार्टून पतंग\n* छोटे बच्चों की पसंदीदा पतंग \n* ५ से ६ डिजाइंस में \n* ५ रूपये बेचने के लिए अच्छी पतंग",
+    "highlights": [],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Plastic kite"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Fancy Ghuta Pona",
+    "category": "fighterKites",
+    "price": 11.5,
+    "description": "A fancy Pona-size paper kite in the classic Ghuta style — one bold colour with a white tail (puchhi), a bamboo spine (dhaddha) and a curved bamboo bow (kamaan) tied firmly at the joint. Balanced and quick to respond in the air, it is a favourite for pench (kite fights) and a steady seller for kite shops.\n\n* फैंसी घुटा पौना – पेपर की पौना साइज पतंग\n* एक रंग की सुंदर पतंग, सफ़ेद पूँछ (पुच्छी) के साथ\n* बांस का मज़बूत ढड्ढा और कमान – संतुलित, तेज़ उड़ान\n* पेच लड़ाने के लिए बढ़िया पतंग\n* अलग-अलग रंगों में उपलब्ध (जैसे बैंगनी, काला)\n* दुकानदारी के लिए जल्दी बिकने वाली पतंग",
+    "highlights": [
+      "Pona size paper kite",
+      "Classic Ghuta style: one bold colour with a white tail",
+      "Bamboo dhaddha and kamaan for a balanced, quick flight",
+      "Great for pench (kite fights)",
+      "Fast seller for kite shops"
+    ],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Paper kite"
+      },
+      {
+        "label": "Size",
+        "value": "Pona"
+      },
+      {
+        "label": "Design",
+        "value": "Ghuta"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Fancy Marble",
+    "category": "designerKites",
+    "price": 3.8,
+    "description": "A budget-friendly kite with a fancy marble-style print. Bright, low priced and quick to sell in volume.",
+    "highlights": [
+      "Marble-effect print",
+      "Low price per piece — good for bulk counter sales",
+      "Mixed colours"
+    ],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Plastic kite"
+      },
+      {
+        "label": "Design",
+        "value": "Marble print"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Jhalar 27.5 inch",
+    "category": "designerKites",
+    "price": 5.5,
+    "description": "A 27.5-inch Jhalar kite — colourful, festive and steady in the sky.",
+    "highlights": [
+      "Jhalar style",
+      "27.5-inch size",
+      "Colourful and festive"
+    ],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Plastic kite"
+      },
+      {
+        "label": "Style",
+        "value": "Jhalar"
+      },
+      {
+        "label": "Size",
+        "value": "27.5 inch"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Jhalar 30.5 inch",
+    "category": "designerKites",
+    "price": 6.5,
+    "description": "The bigger Jhalar kite at 30.5 inches — more presence in the sky and easy to spot.",
+    "highlights": [
+      "Jhalar style",
+      "Larger 30.5-inch size",
+      "Bold and easy to spot when flying"
+    ],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Plastic kite"
+      },
+      {
+        "label": "Style",
+        "value": "Jhalar"
+      },
+      {
+        "label": "Size",
+        "value": "30.5 inch"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Manjholi",
+    "category": "fighterKites",
+    "price": 6,
+    "description": "* रामपुर मंझौली पतंग \n* ४-६ डिजाइन  \n* मीडियम क्वालिटी\n* 10 रूपये से लेकर १२ रूपये तक बेचने लिए",
+    "highlights": [],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Paper kite"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "PVC 24 inch",
+    "category": "designerKites",
+    "price": 1.5,
+    "description": "A compact 24-inch PVC kite at our lowest price. The plastic sheet shrugs off damp weather and light handling — ideal for children and high-volume sales.",
+    "highlights": [
+      "PVC plastic — resists moisture and tearing",
+      "Compact 24-inch size, easy for beginners",
+      "Lowest price per piece in the range"
+    ],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Plastic kite"
+      },
+      {
+        "label": "Material",
+        "value": "PVC"
+      },
+      {
+        "label": "Size",
+        "value": "24 inch"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Plastic Print 27.5 inch",
+    "category": "designerKites",
+    "price": 3.7,
+    "description": "A printed plastic kite, 27.5 inches across. Bright prints on a durable sheet that holds up better than paper.",
+    "highlights": [
+      "Bright printed designs",
+      "Plastic sheet — more durable than paper",
+      "27.5-inch size"
+    ],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Plastic kite"
+      },
+      {
+        "label": "Material",
+        "value": "Plastic"
+      },
+      {
+        "label": "Size",
+        "value": "27.5 inch"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Plastic Print Matka 30 inch",
+    "category": "designerKites",
+    "price": 5.5,
+    "description": "A printed plastic kite in the Matka design, 30 inches across — a crowd favourite with a distinctive look.",
+    "highlights": [
+      "Matka design print",
+      "Durable plastic sheet",
+      "30-inch size"
+    ],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Plastic kite"
+      },
+      {
+        "label": "Material",
+        "value": "Plastic"
+      },
+      {
+        "label": "Design",
+        "value": "Matka"
+      },
+      {
+        "label": "Size",
+        "value": "30 inch"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Plastic Tawa",
+    "category": "designerKites",
+    "price": 14,
+    "description": "* प्लास्टिक तावा यानी ४२.५ इंच की बड़ी पतंग\n* ३ से ६ डिजाइन में उपलब्ध\n* २५ रूपये से लेकर ५० रूपये तक बेचने के लिए अच्छी पतंग",
+    "highlights": [],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Plastic kite"
+      },
+      {
+        "label": "Material",
+        "value": "Plastic"
+      },
+      {
+        "label": "Style",
+        "value": "Tawa"
+      },
+      {
+        "label": "Size",
+        "value": "42 inch"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Pona",
+    "category": "fighterKites",
+    "price": 9.5,
+    "description": "* पौना साइज पतंग ।\n* दुकानदारी के लिए अच्छी पतंग । \n* रामपुर पतंग \n* उड़ाने के लिए मीडियम क्वालिटी की पतंग",
+    "highlights": [
+      "Pona size",
+      "Classic paper patang build, steady and quick to respond",
+      "Popular with regular flyers"
+    ],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Paper kite"
+      },
+      {
+        "label": "Size",
+        "value": "Pona"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      },
+      {
+        "label": "Length",
+        "value": "34.5 inch"
+      }
+    ]
+  },
+  {
+    "name": "Pona Matka",
+    "category": "fighterKites",
+    "price": 13,
+    "description": "* पेपर की मटका या लग्गू नाम से फेमस \n* ४-६ डिजाइन में उपलब्ध \n* बड़े साइज की पतंग (३४ इंच की कमान)\n* फैंसी पतंग \n* २० रूपये से लेकर २५ रूपये तक बेचने के लिए अच्छी पतंग",
+    "highlights": [],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Paper kite"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Pona Print",
+    "category": "designerKites",
+    "price": 6.8,
+    "description": "* प्लास्टिक प्रिंट पोना (बड़ा) साइज\n* ४-६ डिजाइन में उपलब्ध\n* १२ रूपये से लेकर १५ रूपय तक बेचने के लिए अच्छी पतंग",
+    "highlights": [],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Plastic kite"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  },
+  {
+    "name": "Printed Plastic Kite",
+    "category": "designerKites",
+    "price": 4,
+    "description": "A colourful printed plastic kite — a dependable, low-cost seller for every season.",
+    "highlights": [
+      "Bright printed designs",
+      "Plastic sheet — handles damp weather better than paper",
+      "Good value for bulk buying"
+    ],
+    "specs": [
+      {
+        "label": "Type",
+        "value": "Plastic kite"
+      },
+      {
+        "label": "Material",
+        "value": "Plastic"
+      },
+      {
+        "label": "Sold per",
+        "value": "Piece"
+      }
+    ]
+  }
+]
