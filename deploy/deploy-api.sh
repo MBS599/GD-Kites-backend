@@ -73,3 +73,19 @@ if ! healthy; then
   exit 1
 fi
 echo "gdkites-api: $(systemctl is-active gdkites-api) since $(systemctl show -p ActiveEnterTimestamp --value gdkites-api)"
+
+# Catalogue content shipped with a release (deploy/content/*.json: descriptions, highlights,
+# specifications; see update-product-content.py). Each file is applied once and remembered,
+# so later edits made in the admin app are never overwritten by a redeploy.
+APPLIED=/var/lib/gdkites/content-applied
+mkdir -p "$APPLIED"
+for f in "$API"/deploy/content/*.json; do
+  [ -e "$f" ] || continue
+  name=$(basename "$f")
+  [ -e "$APPLIED/$name" ] && continue
+  if python3 "$API/deploy/update-product-content.py" "$f" --save; then
+    touch "$APPLIED/$name"
+  else
+    echo "warning: catalogue content $name was not applied (see above); the API is deployed" >&2
+  fi
+done
