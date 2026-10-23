@@ -9,7 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 
 /** Home tile pictures and colour sets the app can draw (null = the app's default). */
-export const CATEGORY_ICONS = ['kite', 'firki', 'accessories', 'combo'] as const;
+export const CATEGORY_ICONS = ['kite', 'firki', 'manjha', 'accessories', 'combo'] as const;
 export const CATEGORY_COLORS = ['yellow', 'sky', 'red', 'ink', 'pink', 'orange', 'violet'] as const;
 
 export class CreateCategoryDto {
