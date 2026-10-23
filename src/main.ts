@@ -1,9 +1,14 @@
 import 'reflect-metadata';
+import { setDefaultResultOrder } from 'node:dns';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { configureApp } from './bootstrap';
+
+// Outbound calls (Google Maps, Razorpay, …) over IPv4: the Google server key allows the server's
+// static IPv4 only, and the instance's IPv6 address changes with the instance.
+setDefaultResultOrder('ipv4first');
 
 async function main() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
