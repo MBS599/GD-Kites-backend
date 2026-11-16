@@ -139,6 +139,8 @@ model AppSettings {
   courierPackingCharge  Decimal      @default(200) @db.Decimal(10, 2)
   /// Shown on the update screens (e.g. what changed); null for the default text.
   updateMessage         String?
+  /// The app is public on Google Play: website-APK installs are sent to Play to update.
+  playStoreLive         Boolean      @default(false)
   updatedAt             DateTime     @updatedAt
 }
 

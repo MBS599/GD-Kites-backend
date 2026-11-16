@@ -1,0 +1,1 @@
+ALTER TABLE "AppSettings" ADD COLUMN "playStoreLive" BOOLEAN NOT NULL DEFAULT false;

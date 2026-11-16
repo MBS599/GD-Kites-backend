@@ -75,6 +75,8 @@ export class UpdateSettingsDto {
   @IsString()
   @MaxLength(300)
   updateMessage?: string | null;
+  /** The app is public on Google Play: website-APK installs update from Play. */
+  @IsOptional() @IsBoolean() playStoreLive?: boolean;
 }
 
 const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
@@ -88,6 +90,7 @@ const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
   deliveryVehicleType: s.deliveryVehicleType ? vehicleTypeOut(s.deliveryVehicleType) : null,
   androidMinBuild: s.androidMinBuild,
   updateMessage: s.updateMessage,
+  playStoreLive: s.playStoreLive,
   courierEnabled: s.courierEnabled,
   courierPackingCharge: s.courierPackingCharge.toNumber(),
 });
@@ -166,7 +169,7 @@ export class AppVersionController {
   async version() {
     const s = await this.prisma.appSettings.findUnique({
       where: { id: 1 },
-      select: { androidMinBuild: true, updateMessage: true },
+      select: { androidMinBuild: true, updateMessage: true, playStoreLive: true },
     });
     const latest = await this.published();
     return {
@@ -179,6 +182,9 @@ export class AppVersionController {
         minBuild: s?.androidMinBuild ?? 0,
         message: s?.updateMessage ?? null,
         url: this.config.get('APK_URL'),
+        /** The app is public on Google Play (admin setting): website installs update from there. */
+        playStoreLive: s?.playStoreLive ?? false,
+        playStoreUrl: 'https://play.google.com/store/apps/details?id=in.gdkites.app',
       },
     };
   }

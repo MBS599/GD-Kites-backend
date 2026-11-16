@@ -1870,6 +1870,19 @@ describe('GD Kite Center API (e2e)', () => {
       await http.patch(`${API}/settings`).set(auth(admin)).send({ androidMinBuild: -1 }).expect(400);
       await http.patch(`${API}/settings`).set(auth(admin)).send({ androidMinBuild: 0, updateMessage: '' }).expect(200);
       expect((await http.get(`${API}/app/version`)).body.android).toMatchObject({ minBuild: 0, message: null });
+
+      // Live on Google Play: website installs are sent to Play to update.
+      expect((await http.get(`${API}/app/version`)).body.android).toMatchObject({
+        playStoreLive: false,
+        playStoreUrl: 'https://play.google.com/store/apps/details?id=in.gdkites.app',
+      });
+      await http.patch(`${API}/settings`).set(auth(customer)).send({ playStoreLive: true }).expect(403);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ playStoreLive: 'yes' }).expect(400);
+      expect((await http.patch(`${API}/settings`).set(auth(admin)).send({ playStoreLive: true }).expect(200)).body.settings).toMatchObject({
+        playStoreLive: true,
+      });
+      expect((await http.get(`${API}/app/version`)).body.android.playStoreLive).toBe(true);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ playStoreLive: false }).expect(200);
     });
   });
 
