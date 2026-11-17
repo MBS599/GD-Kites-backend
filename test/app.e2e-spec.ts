@@ -1910,6 +1910,40 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('admin users', () => {
+    it('lists customers with email, mobile and sign-in method, and switches accounts off and on', async () => {
+      const s = await login('shreeganesh.traders@gmail.com');
+      await http.get(`${API}/admin/users`).set(auth(customer)).expect(403);
+      const all = (await http.get(`${API}/admin/users`).set(auth(admin)).expect(200)).body;
+      const ganesh = all.users.find((u: any) => u.id === s.user.id);
+      expect(ganesh).toMatchObject({ email: 'shreeganesh.traders@gmail.com', isActive: true });
+      expect(ganesh.signIn).toEqual([]); // seeded: never signed in with Google or OTP
+      const otp = (await http.get(`${API}/admin/users`).set(auth(admin))).body.users.find((u: any) => u.id === customer.user.id);
+      expect(otp).toBeDefined();
+      expect(all.users.every((u: any) => u.id !== driver.user.id && u.id !== admin.user.id)).toBe(true);
+      expect(all.counts.active).toBeGreaterThan(0);
+      expect((await http.get(`${API}/admin/users`).set(auth(admin)).query({ q: 'shreeganesh' })).body.users.map((u: any) => u.id)).toEqual([s.user.id]);
+
+      // Off: signed out everywhere, can't sign in, gone from the offer customer picker.
+      await http.patch(`${API}/admin/users/${driver.user.id}`).set(auth(admin)).send({ isActive: false }).expect(404);
+      await http.patch(`${API}/admin/users/${s.user.id}`).set(auth(admin)).send({ isActive: 'no' }).expect(400);
+      const off = (await http.patch(`${API}/admin/users/${s.user.id}`).set(auth(admin)).send({ isActive: false }).expect(200)).body.user;
+      expect(off.isActive).toBe(false);
+      await http.get(`${API}/auth/me`).set(auth(s)).expect(401);
+      await http.post(`${API}/auth/refresh`).send({ refreshToken: s.refreshToken }).expect(401);
+      const picker = (await http.get(`${API}/admin/offers/customers`).set(auth(admin)).query({ q: 'shreeganesh' })).body.customers;
+      expect(picker).toEqual([]);
+      const inactive = (await http.get(`${API}/admin/users`).set(auth(admin)).query({ status: 'inactive' })).body.users;
+      expect(inactive.map((u: any) => u.id)).toContain(s.user.id);
+
+      // On again: back in the picker and able to sign in.
+      await http.patch(`${API}/admin/users/${s.user.id}`).set(auth(admin)).send({ isActive: true }).expect(200);
+      expect((await http.get(`${API}/admin/offers/customers`).set(auth(admin)).query({ q: 'shreeganesh' })).body.customers).toHaveLength(1);
+      const again = await login('shreeganesh.traders@gmail.com');
+      await http.get(`${API}/auth/me`).set(auth(again)).expect(200);
+    });
+  });
+
   describe('account deletion', () => {
     it('is for customers only', async () => {
       await http.delete(`${API}/users/me`).set(auth(driver)).expect(403);

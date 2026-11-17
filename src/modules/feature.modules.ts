@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { AddressesController } from './addresses/addresses.controller';
 import { AdminController } from './admin/admin.controller';
 import { TeamController } from './admin/team.controller';
+import { UsersAdminController } from './admin/users.controller';
 import { AuthController } from './auth/auth.controller';
 import { AuthService } from './auth/auth.service';
 import { GoogleVerifier } from './auth/google-verifier.service';
@@ -125,5 +126,5 @@ export class DriversModule {}
 export class DeliveriesModule {}
 
 /** Admin dashboard and reports. */
-@Module({ controllers: [AdminController, TeamController, ReportsController] })
+@Module({ controllers: [AdminController, TeamController, UsersAdminController, ReportsController] })
 export class AdminModule {}
