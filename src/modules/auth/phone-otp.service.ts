@@ -8,7 +8,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { PHONE_TAKEN, phoneInUse } from '../../common/phone-unique';
+import { phoneInUse } from '../../common/phone-unique';
 import type { UserWithDriver } from '../../common/serializers';
 import { AppConfig } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -74,12 +74,17 @@ export class PhoneOtpService {
     return phone;
   }
 
-  async request(raw: string) {
+  async request(raw: string, userId?: string) {
     if (!this.enabled) throw new ServiceUnavailableException('Mobile sign-in is not available right now.');
     const phone = this.phone(raw);
     const now = Date.now();
     const recent = await this.prisma.otpChallenge.findMany({
-      where: { phone, createdAt: { gte: new Date(now - 60 * 60_000) } },
+      // Codes that never arrived don't count towards the wait or the hourly limit.
+      where: {
+        phone,
+        createdAt: { gte: new Date(now - 60 * 60_000) },
+        OR: [{ failure: null }, { NOT: { failure: { startsWith: 'not sent' } } }],
+      },
       orderBy: { createdAt: 'desc' },
     });
     const last = recent[0];
@@ -96,12 +101,16 @@ export class PhoneOtpService {
     const code = review ? this.config.get('REVIEW_LOGIN_CODE') : this.otp.code(LOGIN_OTP.digits);
     // Older unused codes stop working as soon as a new one is issued.
     await this.prisma.otpChallenge.updateMany({ where: { phone, consumedAt: null }, data: { consumedAt: new Date() } });
-    await this.prisma.otpChallenge.create({
-      data: { phone, codeHash: this.hash(phone, code), expiresAt: new Date(now + LOGIN_OTP.ttlMs) },
+    const challenge = await this.prisma.otpChallenge.create({
+      data: { phone, userId: userId ?? null, codeHash: this.hash(phone, code), expiresAt: new Date(now + LOGIN_OTP.ttlMs) },
     });
-    const status = review ? 'SENT' : await this.sms.loginOtp(phone, code);
-    if (status === 'FAILED' || status === 'SKIPPED') {
-      throw new ServiceUnavailableException('Could not send the SMS right now. Please try again or sign in with Google.');
+    const sent = review ? { status: 'SENT' as const, error: null } : await this.sms.loginOtp(phone, code);
+    if (sent.status === 'FAILED' || sent.status === 'SKIPPED') {
+      // The code never arrived: it can't be used, and asking again right away is fine.
+      await this.prisma.otpChallenge
+        .update({ where: { id: challenge.id }, data: { consumedAt: new Date(), failure: `not sent: ${sent.error ?? sent.status}`.slice(0, 200) } })
+        .catch(() => undefined);
+      throw new ServiceUnavailableException(sendFailureMessage(sent.error, this.channel));
     }
     return {
       sentTo: display(phone),
@@ -157,9 +166,20 @@ export class PhoneOtpService {
    */
   async link(userId: string, raw: string, code: string): Promise<UserWithDriver> {
     const phone = this.phone(raw);
-    const challenge = await this.check(phone, code);
-    // One account per number: verified elsewhere, or saved on another account.
-    if (await phoneInUse(this.prisma, phone, userId)) throw new ConflictException(PHONE_TAKEN);
+    // Whose code this is and why it failed, for the "customers without a mobile" report.
+    const latest = await this.prisma.otpChallenge.findFirst({ where: { phone }, orderBy: { createdAt: 'desc' } });
+    if (latest && !latest.userId) {
+      await this.prisma.otpChallenge.update({ where: { id: latest.id }, data: { userId } }).catch(() => undefined);
+    }
+    let challenge: Awaited<ReturnType<typeof this.check>>;
+    try {
+      challenge = await this.check(phone, code);
+      // One account per number: verified elsewhere, or saved on another account.
+      if (await phoneInUse(this.prisma, phone, userId)) throw new ConflictException(PHONE_TAKEN_LINK);
+    } catch (e) {
+      if (latest) await this.fail(latest.id, e instanceof Error ? e.message : String(e));
+      throw e;
+    }
     await this.consume(challenge.id);
     return this.prisma.user.update({
       where: { id: userId },
@@ -187,6 +207,11 @@ export class PhoneOtpService {
     return challenge;
   }
 
+  /** Remembers why this code didn't work. */
+  private async fail(id: string, why: string) {
+    await this.prisma.otpChallenge.update({ where: { id }, data: { failure: why.slice(0, 200) } }).catch(() => undefined);
+  }
+
   /** Single use, even under concurrent requests. */
   private async consume(id: string) {
     const used = await this.prisma.otpChallenge.updateMany({ where: { id, consumedAt: null }, data: { consumedAt: new Date() } });
@@ -208,4 +233,20 @@ export class PhoneOtpService {
       ? this.prisma.user.findUniqueOrThrow({ where: { id: rows[0].id }, include: { driverProfile: true } })
       : null;
   }
+}
+
+/** Shown when "Add your mobile number" finds the number on another account. */
+export const PHONE_TAKEN_LINK =
+  'This number already has a GD Kites account. Sign out, then sign in with this mobile number to use that account.';
+
+/** What the customer sees when the code could not be sent, by the gateway's error. */
+export function sendFailureMessage(error: string | null, channel: 'whatsapp' | 'sms'): string {
+  const e = (error ?? '').toLowerCase();
+  if (e.includes('not on whatsapp')) {
+    return 'This number is not on WhatsApp. Enter the mobile number you use on WhatsApp.';
+  }
+  if (e.includes('allowlist')) return "Codes can't be sent to this number right now.";
+  return channel === 'whatsapp'
+    ? "We couldn't send the WhatsApp code just now. Please try again in a minute."
+    : "We couldn't send the SMS just now. Please try again in a minute.";
 }

@@ -48,6 +48,21 @@ function session(prisma: any = fakePrisma()) {
 }
 
 describe('WhatsApp Web (linked phone)', () => {
+  it('a frozen browser fails the send quickly and restarts WhatsApp Web', async () => {
+    const { s, fake } = session();
+    await s.start();
+    fake.emit('ready');
+    fake.getNumberId = () => Promise.reject(new Error('Runtime.callFunctionOn timed out. Increase the protocolTimeout'));
+    const restart = jest.spyOn(s, 'restart').mockResolvedValue();
+    await expect(s.send('919822011122', 'hi')).rejects.toThrow('timed out');
+    expect(restart).toHaveBeenCalledTimes(1);
+    // The provider retries it (a fresh browser may send it); "not on WhatsApp" is final.
+    const provider = new WhatsAppWebProvider(s);
+    await expect(provider.send({ event: 'loginOtp', to: '919822011122', vars: [], text: 'x' })).rejects.toMatchObject({
+      retryable: true,
+    });
+  });
+
   it('shows a QR code until the phone is linked, then becomes ready', async () => {
     const { s, fake } = session();
     await s.start();

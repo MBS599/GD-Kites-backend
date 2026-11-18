@@ -239,12 +239,14 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
     const gap = this.config.get('WWEBJS_MIN_GAP_MS');
     const wait = this.lastSendAt + gap + Math.floor(Math.random() * gap) - Date.now();
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    const id = await this.client.getNumberId(to);
+    const client = this.client;
+    const id = await this.guard(client.getNumberId(to), 'checking the number');
     if (!id) throw new NotOnWhatsAppError();
     let sent: { id?: { _serialized?: string } } | undefined;
     try {
-      sent = await this.client.sendMessage(id._serialized, text);
+      sent = await this.guard(client.sendMessage(id._serialized, text), 'sending');
     } catch (e) {
+      if (e instanceof WebStuckError) throw e;
       // whatsapp-web.js can fail *after* WhatsApp accepted the message
       // (e.g. "Cannot read properties of undefined (reading 'id')" when
       // WhatsApp Web changes). Treat it as sent — retrying would send it twice.
@@ -253,6 +255,41 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
       this.lastSendAt = Date.now();
     }
     return sent?.id?._serialized ?? (await this.lastSentId(id._serialized, text));
+  }
+
+  /**
+   * WhatsApp Web runs in a headless Chrome that can freeze (low memory, a WhatsApp Web update):
+   * calls then hang for minutes and end in "Runtime.callFunctionOn timed out". Give up after
+   * SEND_TIMEOUT_MS instead and restart the browser so the next message goes through (the saved
+   * login is kept, so no new QR code).
+   */
+  private async guard<T>(call: Promise<T>, what: string): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new WebStuckError(`WhatsApp did not respond while ${what}`)), SEND_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([call, timeout]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (e instanceof WebStuckError || BROWSER_DEAD.test(msg)) {
+        this.restartAfterFreeze(msg);
+        throw e instanceof WebStuckError ? e : new WebStuckError(msg);
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+      call.catch(() => undefined);
+    }
+  }
+
+  private restarting = false;
+  private restartAfterFreeze(why: string) {
+    if (this.restarting) return;
+    this.restarting = true;
+    this.lastError = `Restarted after: ${why}`;
+    this.logger.warn(`WhatsApp Web stopped responding (${why}); restarting it.`);
+    void this.restart().finally(() => (this.restarting = false));
   }
 
   /** Finds the message we just sent when the library couldn't return it (for delivery ticks). */
@@ -280,6 +317,12 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
 }
 
 export class WebNotReadyError extends Error {}
+/** The browser behind WhatsApp Web froze or closed; it is being restarted. */
+export class WebStuckError extends Error {}
+
+const SEND_TIMEOUT_MS = 25_000;
+/** Puppeteer errors meaning the page or browser is gone or frozen. */
+const BROWSER_DEAD = /timed out|Protocol error|Target closed|Session closed|detached Frame|Execution context was destroyed/i;
 export class NotOnWhatsAppError extends Error {
   constructor() {
     super('This number is not on WhatsApp.');

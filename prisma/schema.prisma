@@ -538,8 +538,13 @@ model OtpChallenge {
   expiresAt  DateTime
   consumedAt DateTime?
   createdAt  DateTime  @default(now())
+  /// Signed-in account adding this number ("Add your mobile number" after Google sign-in).
+  userId     String?
+  /// Why the last attempt with this code failed (message not sent, number taken, wrong code…).
+  failure    String?
 
   @@index([phone, createdAt])
+  @@index([userId])
 }
 
 /// Firebase Cloud Messaging registration of one app install (push notifications).

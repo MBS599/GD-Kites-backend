@@ -167,7 +167,7 @@ export class SmsService {
    */
   async loginOtp(to: string, code: string) {
     const m = await this.process({ event: 'loginOtp', to, vars: [code] }, { dedupe: false });
-    return m.status;
+    return { status: m.status, error: m.error ?? null };
   }
 
   /** Courier drop-off started (no handover code: the customer isn't at the courier office). */

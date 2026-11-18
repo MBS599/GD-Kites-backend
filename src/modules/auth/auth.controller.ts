@@ -2,6 +2,7 @@ import { Body, Controller, Get, Headers, HttpCode, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentUser, Public, type AuthUser } from '../../common/auth.decorators';
+import { AccessTokenVerifier } from '../../common/auth.guards';
 import { userOut } from '../../common/serializers';
 import { AppConfig } from '../../config/app-config.service';
 import { SettingsService } from '../settings/settings.controller';
@@ -20,6 +21,7 @@ export class AuthController {
     private readonly config: AppConfig,
     private readonly phoneOtp: PhoneOtpService,
     private readonly settings: SettingsService,
+    private readonly tokens: AccessTokenVerifier,
   ) {}
 
   /** Exchange a Google ID token for an access + refresh token pair. */
@@ -37,8 +39,11 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('otp/request')
   @HttpCode(200)
-  async otpRequest(@Body() dto: OtpRequestDto) {
-    return this.phoneOtp.request(dto.phone);
+  async otpRequest(@Body() dto: OtpRequestDto, @Headers('authorization') authorization?: string) {
+    // Signed in (adding a mobile after Google sign-in): remember whose code it is, for support.
+    const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : undefined;
+    const user = token ? await this.tokens.verify(token).catch(() => null) : null;
+    return this.phoneOtp.request(dto.phone, user?.id);
   }
 
   /**

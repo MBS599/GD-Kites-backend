@@ -171,10 +171,16 @@ describe('GD Kite Center API (e2e)', () => {
       // Already confirmed on another account (Sai Kites, from the OTP test).
       await otp.request('9123456789');
       const taken = await http.post(`${API}/auth/phone/verify`).set(auth(s)).send({ phone: '9123456789', code: '123456' }).expect(409);
-      expect(taken.body.error.message).toContain('another');
+      expect(taken.body.error.message).toContain('already has a GD Kites account');
+      // Recorded for the "customers without a mobile" report: whose code it was and why it failed.
+      expect(await prisma.otpChallenge.findFirst({ where: { phone: '919123456789' } })).toMatchObject({
+        userId: user.id,
+        failure: expect.stringContaining('already has'),
+      });
 
       await otp.request('98111 22233');
       await http.post(`${API}/auth/phone/verify`).set(auth(s)).send({ phone: '9811122233', code: '000000' }).expect(400);
+      expect((await prisma.otpChallenge.findFirst({ where: { phone: '919811122233' } }))?.failure).toContain('Incorrect code');
       const ok = (await http.post(`${API}/auth/phone/verify`).set(auth(s)).send({ phone: '9811122233', code: '123456' }).expect(200)).body;
       expect(ok.user).toMatchObject({ phone: '+91 98111 22233', phoneVerified: true, role: 'customer' });
       // Single use.
