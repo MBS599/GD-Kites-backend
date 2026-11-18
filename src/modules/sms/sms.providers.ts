@@ -9,8 +9,16 @@ export interface SmsRequest {
   /** 12-digit Indian number without "+", e.g. 919822011122. */
   to: string;
   vars: string[];
-  /** Rendered text (development log / audit log). */
+  /** Rendered text (development log / audit log); the caption when a document is attached. */
   text: string;
+  /** A file sent with the message, e.g. the bill PDF (WhatsApp Web only). */
+  document?: SmsDocument;
+}
+
+export interface SmsDocument {
+  data: Buffer;
+  filename: string;
+  mimetype: string;
 }
 
 /** A messaging channel: WhatsApp in production, the server log in development. */
@@ -36,7 +44,7 @@ export class LogSmsProvider implements SmsProvider {
   readonly name = 'log';
   constructor(private readonly log: (line: string) => void) {}
   async send(req: SmsRequest) {
-    this.log(`Message to ${req.to}: ${req.text}`);
+    this.log(`Message to ${req.to}: ${req.text}${req.document ? ` [attached ${req.document.filename}]` : ''}`);
     return {};
   }
 }
@@ -58,6 +66,10 @@ export class WhatsAppProvider implements SmsProvider {
   ) {}
 
   async send(req: SmsRequest) {
+    if (req.document) {
+      // Cloud API documents need a media upload and a document-header template: not set up.
+      throw new SmsProviderError('Sending files needs the linked WhatsApp phone (WhatsApp Web).', false);
+    }
     const t = WA_TEMPLATES[req.event];
     const params = t.params(req.vars);
     const components: unknown[] = [];
@@ -108,7 +120,10 @@ export class WhatsAppWebProvider implements SmsProvider {
 
   async send(req: SmsRequest) {
     try {
-      return { ref: (await this.session.send(req.to, req.text)) ?? undefined };
+      const ref = req.document
+        ? await this.session.sendDocument(req.to, req.document, req.text)
+        : await this.session.send(req.to, req.text);
+      return { ref: ref ?? undefined };
     } catch (e) {
       // Not linked / not on WhatsApp: retrying won't help. Anything else (browser hiccup) might.
       const permanent = e instanceof WebNotReadyError || e instanceof NotOnWhatsAppError;

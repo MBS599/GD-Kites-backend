@@ -116,6 +116,13 @@ export const WA_TEMPLATES: Record<SmsEvent, WaTemplate> = {
     examples: ['Mayur', 'GD1037', '100 × Premium Fighter Kite (Medium), 2 × Bareilly Manjha 9 Cord', '2,980'],
     params: same,
   },
+  orderBill: {
+    name: 'gdk_order_bill_v1',
+    category: 'UTILITY',
+    body: 'Hi {{1}},\n\nHere is the bill for your order *#{{2}}* (*Rs {{3}}*).\n\nThank you for shopping with GD Kite Center!' + SIGN,
+    examples: ['Mayur', 'GD1037', '2,980'],
+    params: same,
+  },
   orderCancelled: {
     name: 'gdk_order_cancelled_v3',
     category: 'UTILITY',

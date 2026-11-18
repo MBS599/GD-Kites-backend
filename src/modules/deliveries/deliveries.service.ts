@@ -6,6 +6,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AppConfig } from '../../config/app-config.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { SmsService } from '../sms/sms.service';
+import { BillService } from '../orders/bills';
 import { OtpGenerator, sameHash } from '../sms/otp';
 import { RoutingService } from '../routing/routing.service';
 import { assertTransition, moveOrder, refreshDriverAvailability } from '../orders/order-workflow';
@@ -32,6 +33,7 @@ export class DeliveriesService {
     private readonly config: AppConfig,
     private readonly sms: SmsService,
     private readonly otp: OtpGenerator,
+    private readonly bills: BillService,
   ) {}
 
   /** Loads a delivery by order id, only if it belongs to this driver (404 otherwise). */
@@ -186,7 +188,10 @@ export class DeliveriesService {
       return refreshDriverAvailability(tx, driverId);
     });
     this.realtime.driverUpdated(driver);
-    return this.emit(orderId, (o) => (courier ? this.sms.courierDropped(o) : this.sms.orderDelivered(o)));
+    const out = await this.emit(orderId, (o) => (courier ? this.sms.courierDropped(o) : this.sms.orderDelivered(o)));
+    // Then the bill PDF on WhatsApp (queued after the delivered message).
+    this.bills.sendAfterDelivery(orderId);
+    return out;
   }
 
   /**

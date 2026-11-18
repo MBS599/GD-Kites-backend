@@ -9,6 +9,7 @@ import { AppConfig } from './config/app-config.service';
 import { validateEnv } from './config/env';
 import { HealthController } from './health.controller';
 import { PrismaModule } from './prisma/prisma.service';
+import { BillsModule } from './modules/orders/bills';
 import {
   AddressesModule,
   AdminModule,
@@ -41,6 +42,7 @@ class CoreModule {}
     CoreModule,
     RealtimeModule,
     SmsModule,
+    BillsModule,
     ServiceAreasModule,
     AuthModule,
     UsersModule,

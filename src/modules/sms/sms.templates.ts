@@ -62,6 +62,11 @@ export const SMS_TEMPLATES = {
     text: 'Hi {#var#}, your order #{#var#} for {#var#} has been delivered (Rs {#var#}). Thank you for shopping with GD Kite Center!',
     long: [2],
   },
+  /** Caption of the bill PDF sent after delivery. [first name, order, total] */
+  orderBill: {
+    audience: 'customer',
+    text: 'Hi {#var#}, here is the bill for your order #{#var#} (Rs {#var#}). Thank you for shopping with GD Kite Center!',
+  },
   /** [first name, order, items, reason] */
   orderCancelled: {
     audience: 'customer',

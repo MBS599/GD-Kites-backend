@@ -551,6 +551,44 @@ describe('GD Kite Center API (e2e)', () => {
       const other = await login('shreeganesh.traders@gmail.com');
       await http.get(`${API}/orders/${orderId}/tracking`).set(auth(other)).expect(404);
     });
+
+    it('the bill: sent on WhatsApp after delivery, downloadable by the customer and admin, resent by admin', async () => {
+      // Sent automatically, after the "delivered" message, with the PDF attached.
+      await app.get(SmsService).drain();
+      await new Promise((r) => setTimeout(r, 300));
+      await app.get(SmsService).drain();
+      const sent = await prisma.smsMessage.findMany({ where: { orderId, event: 'orderBill' } });
+      expect(sent).toHaveLength(1);
+      expect(sent[0].body).toContain('[attached GD Kites bill GD');
+
+      // The customer gets a short-lived link that opens the PDF without signing in.
+      const link = (await http.get(`${API}/orders/${orderId}/bill-link`).set(auth(customer)).expect(200)).body;
+      expect(link.path).toMatch(/^\/api\/v1\/bills\//);
+      const pdf = await http.get(link.path).buffer(true).parse((res, cb) => {
+        const parts: Buffer[] = [];
+        res.on('data', (c: Buffer) => parts.push(c));
+        res.on('end', () => cb(null, Buffer.concat(parts)));
+      });
+      expect(pdf.status).toBe(200);
+      expect(pdf.headers['content-type']).toContain('application/pdf');
+      expect((pdf.body as Buffer).subarray(0, 4).toString()).toBe('%PDF');
+
+      // Only the owner and admins; a broken link explains what to do.
+      const other = await login('shreeganesh.traders@gmail.com');
+      await http.get(`${API}/orders/${orderId}/bill-link`).set(auth(other)).expect(404);
+      await http.get(`${API}/orders/${orderId}/bill-link`).set(auth(driver)).expect(403);
+      await http.get(`${API}/orders/${orderId}/bill-link`).set(auth(admin)).expect(200);
+      const bad = await http.get(`${API}/bills/not-a-token`).expect(404);
+      expect(bad.body.error.message).toContain('Download bill');
+      // A bill link is not a sign-in token.
+      await http.get(`${API}/auth/me`).set({ authorization: `Bearer ${link.path.split('/').pop()}` }).expect(401);
+
+      // Admin resend waits for the result.
+      await http.post(`${API}/orders/${orderId}/bill/send`).set(auth(customer)).expect(403);
+      const again = (await http.post(`${API}/orders/${orderId}/bill/send`).set(auth(admin)).expect(200)).body;
+      expect(again.status).toBe('LOGGED');
+      expect(await prisma.smsMessage.count({ where: { orderId, event: 'orderBill' } })).toBe(2);
+    });
   });
 
   describe('SMS notifications', () => {

@@ -18,7 +18,11 @@ export interface WebClient {
   logout(): Promise<void>;
   getState(): Promise<string | null>;
   getNumberId(number: string): Promise<{ _serialized: string } | null>;
-  sendMessage(chatId: string, content: string): Promise<{ id?: { _serialized?: string } } | undefined>;
+  sendMessage(
+    chatId: string,
+    content: unknown,
+    options?: { caption?: string; sendMediaAsDocument?: boolean },
+  ): Promise<{ id?: { _serialized?: string } } | undefined>;
   getChatById(chatId: string): Promise<{
     fetchMessages(opts: { limit: number; fromMe?: boolean }): Promise<{ body: string; id?: { _serialized?: string } }[]>;
   }>;
@@ -222,6 +226,39 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
    * Sends one text. Messages go one at a time with a minimum gap, so the
    * account doesn't look like a bulk sender.
    */
+  /** A file (the bill PDF) with a caption, queued with the text messages. */
+  sendDocument(to: string, doc: { data: Buffer; filename: string; mimetype: string }, caption: string) {
+    const next = this.sendChain.then(async () => {
+      const client = this.readyClient();
+      const id = await this.guard(client.getNumberId(to), 'checking the number');
+      if (!id) throw new NotOnWhatsAppError();
+      const media = await this.createMedia(doc);
+      try {
+        const sent = await this.guard(client.sendMessage(id._serialized, media, { caption, sendMediaAsDocument: true }), 'sending the file');
+        return sent?.id?._serialized ?? null;
+      } finally {
+        this.lastSendAt = Date.now();
+      }
+    });
+    this.sendChain = next.catch(() => undefined);
+    return next;
+  }
+
+  /** Overridable in tests. */
+  protected async createMedia(doc: { data: Buffer; filename: string; mimetype: string }): Promise<unknown> {
+    const { MessageMedia } = await import('whatsapp-web.js');
+    return new MessageMedia(doc.mimetype, doc.data.toString('base64'), doc.filename);
+  }
+
+  private readyClient() {
+    if (this.state !== 'ready' || !this.client) {
+      throw new WebNotReadyError(
+        this.state === 'qr' ? 'WhatsApp is not linked yet — scan the QR code in Admin → Settings.' : `WhatsApp is not connected (${this.state}).`,
+      );
+    }
+    return this.client;
+  }
+
   send(to: string, text: string) {
     const next = this.sendChain.then(() => this.sendNow(to, text));
     this.sendChain = next.catch(() => undefined);

@@ -3,7 +3,14 @@ import type { Product, User } from '@prisma/client';
 import { AppConfig } from '../../config/app-config.service';
 import { orderCode, type FullOrder } from '../../common/serializers';
 import { PrismaService } from '../../prisma/prisma.service';
-import { LogSmsProvider, SmsProviderError, WhatsAppProvider, WhatsAppWebProvider, type SmsProvider } from './sms.providers';
+import {
+  LogSmsProvider,
+  SmsProviderError,
+  WhatsAppProvider,
+  WhatsAppWebProvider,
+  type SmsDocument,
+  type SmsProvider,
+} from './sms.providers';
 import { WhatsAppWebSession } from './whatsapp-web.session';
 import { clipVars, maskSecret, renderSms, SMS_EVENTS, type SmsEvent } from './sms.templates';
 import { renderWhatsApp } from './whatsapp.templates';
@@ -15,6 +22,8 @@ interface Job {
   vars: (string | number)[];
   userId?: string;
   orderId?: string;
+  /** Sent with the message (the bill PDF); never stored. */
+  document?: SmsDocument;
 }
 
 /** Same text to the same number within this window is sent once (retries, double taps). */
@@ -197,6 +206,31 @@ export class SmsService {
     this.toCustomer(o, 'orderDelivered', [firstName(o.contactName), orderCode(o.number), itemsLine(o.items), money(o.total)]);
   }
 
+  /**
+   * The bill PDF on WhatsApp, to the delivery contact number (else the account phone).
+   * After delivery it is queued like other messages (respects "messages off"); the admin's
+   * "Resend on WhatsApp" waits for the result and always sends.
+   */
+  async orderBill(o: FullOrder, pdf: SmsDocument, opts: { wait?: boolean; userId?: string } = {}) {
+    const customer = await this.prisma.user.findUnique({ where: { id: o.customerId } });
+    const name = customer?.name.trim() ? customer.name : o.contactName;
+    const job: Job = {
+      event: 'orderBill',
+      to: o.contactPhone || customer?.phone || '',
+      vars: [firstName(name), orderCode(o.number), money(o.total)],
+      userId: customer?.id,
+      orderId: o.id,
+      document: pdf,
+    };
+    if (!opts.wait) {
+      if (customer?.smsEnabled) this.enqueue(job);
+      return null;
+    }
+    const to = normalizeIndianMobile(job.to);
+    if (!to) return this.record(job, 'SKIPPED', 'Invalid Indian mobile number');
+    return this.process({ ...job, to }, { dedupe: false });
+  }
+
   orderCancelled(o: FullOrder, reason: string, revokedDriverId: string | null) {
     const code = orderCode(o.number);
     this.toCustomer(o, 'orderCancelled', [firstName(o.contactName), code, itemsLine(o.items), reason]);
@@ -279,7 +313,7 @@ export class SmsService {
     const vars = clipVars(job.event, job.vars);
     const text = this.render(job.event, vars);
     // What we store: one-time codes masked.
-    const logText = this.render(job.event, vars, true);
+    const logText = this.render(job.event, vars, true) + (job.document ? ` [attached ${job.document.filename}]` : '');
     const live = this.provider.name !== 'log';
 
     if (opts.dedupe) {
@@ -297,7 +331,7 @@ export class SmsService {
 
     for (let attempt = 0; ; attempt++) {
       try {
-        const { ref } = await this.provider.send({ event: job.event, to: job.to, vars, text });
+        const { ref } = await this.provider.send({ event: job.event, to: job.to, vars, text, document: job.document });
         return this.record(job, live ? 'SENT' : 'LOGGED', null, logText, ref);
       } catch (e) {
         const retryable = e instanceof SmsProviderError && e.retryable;
