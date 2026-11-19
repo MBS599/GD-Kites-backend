@@ -1993,7 +1993,13 @@ describe('GD Kite Center API (e2e)', () => {
       const catalog = (await http.get(`${API}/shop/catalog`).expect(200)).body.products;
       expect(catalog.length).toBeGreaterThan(0);
       const kite = catalog.find((p: any) => p.pack === 50) ?? catalog[0];
-      expect(kite).toMatchObject({ id: expect.any(String), price: expect.any(Number), pack: expect.any(Number) });
+      expect(kite).toMatchObject({
+        id: expect.any(String),
+        price: expect.any(Number),
+        pack: expect.any(Number),
+        images: expect.any(Array),
+        description: expect.any(String),
+      });
       const png = await http.get(`${API}/shop/qr.png`).expect(200);
       expect(png.headers['content-type']).toContain('image/png');
       const poster = await http.get(`${API}/shop/qr-poster.pdf`).buffer(true).expect(200);
@@ -2049,6 +2055,10 @@ describe('GD Kite Center API (e2e)', () => {
       const found = (await http.get(`${API}/shop/customer?phone=9876501234`).set(auth(admin)).expect(200)).body.customer;
       expect(found).toMatchObject({ name: 'Ravi Kite Corner', orders: 1 });
       expect((await http.get(`${API}/shop/customer?phone=9000000999`).set(auth(admin)).expect(200)).body.customer).toBeNull();
+      // The QR page fills in the saved name; WhatsApp status is unknown without WhatsApp Web.
+      expect((await http.get(`${API}/shop/check?phone=9876501234`).expect(200)).body).toEqual({ name: 'Ravi Kite Corner', whatsapp: null });
+      expect((await http.get(`${API}/shop/check?phone=9000000999`).expect(200)).body).toEqual({ name: null, whatsapp: null });
+      await http.get(`${API}/shop/check?phone=12345`).expect(400);
 
       // A counter bill made by the owner for the same number joins that customer.
       const again = (

@@ -101,6 +101,18 @@ describe('WhatsApp Web (linked phone)', () => {
     await s.onModuleDestroy();
   });
 
+  it('says whether a number is on WhatsApp; unknown before linking or when the check fails', async () => {
+    const { s, fake } = session();
+    expect(await s.isOnWhatsApp('919822011122')).toBeNull();
+    await s.start();
+    fake.emit('ready');
+    expect(await s.isOnWhatsApp('919822011122')).toBe(true);
+    expect(await s.isOnWhatsApp('919999999999')).toBe(false);
+    fake.getNumberId = () => Promise.reject(new Error('Evaluation failed'));
+    expect(await s.isOnWhatsApp('919822011122')).toBeNull();
+    expect(s.state).toBe('ready');
+  });
+
   it('refuses to send before linking, with a clear message and no retry', async () => {
     const { s } = session();
     const err = await new WhatsAppWebProvider(s)

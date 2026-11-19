@@ -250,6 +250,23 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
     return new MessageMedia(doc.mimetype, doc.data.toString('base64'), doc.filename);
   }
 
+  /**
+   * Is this number (e.g. "919822011122") on WhatsApp? null when WhatsApp isn't linked/connected,
+   * or the check takes too long; a slow check never restarts the browser.
+   */
+  async isOnWhatsApp(to: string): Promise<boolean | null> {
+    if (this.state !== 'ready' || !this.client) return null;
+    try {
+      const id = await Promise.race([
+        this.client.getNumberId(to),
+        new Promise<'slow'>((resolve) => setTimeout(() => resolve('slow'), 8_000)),
+      ]);
+      return id === 'slow' ? null : !!id;
+    } catch {
+      return null;
+    }
+  }
+
   private readyClient() {
     if (this.state !== 'ready' || !this.client) {
       throw new WebNotReadyError(

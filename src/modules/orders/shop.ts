@@ -29,7 +29,7 @@ import { AppConfig } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { PushService } from '../sms/push.service';
-import { normalizeIndianMobile } from '../sms/sms.service';
+import { normalizeIndianMobile, SmsService } from '../sms/sms.service';
 import { BillService } from './bills';
 import { renderQrPoster } from './qr-poster';
 
@@ -61,6 +61,12 @@ const imageOf = (p: Pick<Product, 'imageUrl' | 'media'>) => {
   const media = Array.isArray(p.media) ? (p.media as { url?: string; type?: string }[]) : [];
   return p.imageUrl ?? media.find((m) => m?.url && m.type !== 'video')?.url ?? null;
 };
+/** Every photo of a product (main image first), for the product view on the QR page. */
+const imagesOf = (p: Pick<Product, 'imageUrl' | 'media'>) => {
+  const media = Array.isArray(p.media) ? (p.media as { url?: string; type?: string }[]) : [];
+  const urls = [p.imageUrl, ...media.filter((m) => m?.url && m.type !== 'video').map((m) => m.url)];
+  return [...new Set(urls.filter((u): u is string => !!u))].slice(0, 8);
+};
 type Line = { productId: string; qty: number };
 
 /**
@@ -77,6 +83,7 @@ export class ShopService {
     private readonly realtime: RealtimeService,
     private readonly push: PushService,
     private readonly config: AppConfig,
+    private readonly sms: SmsService,
   ) {}
 
   private phone(raw: string) {
@@ -104,6 +111,9 @@ export class ShopService {
           pack: packOf(p),
           minQty: p.minQty,
           imageUrl: imageOf(p),
+          images: imagesOf(p),
+          description: p.description.trim(),
+          contents: p.isCombo ? comboContents(p.comboItems) : null,
         })),
     };
   }
@@ -229,6 +239,16 @@ export class ShopService {
     return { customer: u ? { id: u.id, name: u.businessName ?? u.name, orders: await this.prisma.order.count({ where: { customerId: u.id } }) } : null };
   }
 
+  /**
+   * QR page, after the customer types their number: the name we have for it (to fill in) and
+   * whether the number is on WhatsApp (the bill goes there). Either can be null (unknown).
+   */
+  async check(raw: string) {
+    const phone = this.phone(raw);
+    const [u, whatsapp] = await Promise.all([this.findCustomer(phone), this.sms.isOnWhatsApp(phone)]);
+    return { name: u ? (u.businessName ?? u.name) : null, whatsapp };
+  }
+
   private async findCustomer(phone: string) {
     const rows = await this.prisma.$queryRaw<{ id: string }[]>`
       SELECT id FROM "User"
@@ -329,6 +349,14 @@ export class ShopController {
   @Post('requests')
   createRequest(@Body() dto: ShopRequestDto) {
     return this.shop.createRequest(dto);
+  }
+
+  /** Public (QR page): the saved name for a number, and whether it is on WhatsApp. */
+  @Public()
+  @Throttle({ default: { limit: 15, ttl: 60_000 } })
+  @Get('check')
+  check(@Query('phone') phone: string) {
+    return this.shop.check(phone ?? '');
   }
 
   /** Public, with the token from placing it: has the shop billed it yet? */

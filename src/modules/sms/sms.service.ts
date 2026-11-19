@@ -47,7 +47,7 @@ export class SmsService {
     private readonly prisma: PrismaService,
     config: AppConfig,
     private readonly pushService: PushService,
-    webSession: WhatsAppWebSession,
+    private readonly webSession: WhatsAppWebSession,
   ) {
     this.provider = (() => {
       switch (config.get('MESSAGING_PROVIDER')) {
@@ -71,6 +71,23 @@ export class SmsService {
         .filter((n): n is string => !!n),
     );
   }
+
+  /**
+   * Is the number (91XXXXXXXXXX) on WhatsApp? Only known when messages go through WhatsApp Web;
+   * null otherwise or when WhatsApp isn't connected. Answers are kept for a day.
+   */
+  async isOnWhatsApp(phone: string): Promise<boolean | null> {
+    if (this.provider.name !== 'wwebjs') return null;
+    const hit = this.waChecks.get(phone);
+    if (hit && hit.at > Date.now() - 24 * 3600_000) return hit.on;
+    const on = await this.webSession.isOnWhatsApp(phone);
+    if (on !== null) {
+      if (this.waChecks.size > 5000) this.waChecks.clear();
+      this.waChecks.set(phone, { on, at: Date.now() });
+    }
+    return on;
+  }
+  private readonly waChecks = new Map<string, { on: boolean; at: number }>();
 
   /** Setup overview for the admin Settings screen (no secrets). */
   status() {
