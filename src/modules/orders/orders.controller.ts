@@ -28,6 +28,9 @@ export class OrderListQuery {
 
   /** Orders delivered / assigned to one driver (admin driver history). Combined with role scoping. */
   @IsOptional() @IsUUID() driverId?: string;
+
+  /** `shop`: bills made at the shop counter; `online`: orders placed in the app. */
+  @IsOptional() @IsIn(['shop', 'online']) source?: 'shop' | 'online';
 }
 
 export class PlaceOrderDto {
@@ -57,6 +60,7 @@ export class OrdersController {
     const page = await this.orders.list(user, q.status ?? [], q.q, { limit: q.limit, cursor: q.cursor }, {
       serviceAreaId: q.serviceAreaId,
       driverId: q.driverId,
+      source: q.source,
     });
     return { orders: page.items, nextCursor: page.nextCursor };
   }

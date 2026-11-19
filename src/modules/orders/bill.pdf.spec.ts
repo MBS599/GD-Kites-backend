@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import type { FullOrder } from '../../common/serializers';
-import { billMoney, billTotals, renderBill } from './bill.pdf';
+import { billKind, billMoney, billTotals, renderBill } from './bill.pdf';
 
 const d = (v: number) => new Prisma.Decimal(v);
 
@@ -58,6 +58,12 @@ describe('bill PDF', () => {
     expect(billTotals(o).rows.map((r) => r.label)).toEqual(['Goods']);
     expect(billTotals(o).cash).toBe(3000);
     expect((await renderBill(o, { phone: null })).subarray(0, 4).toString()).toBe('%PDF');
+  });
+
+  it('says where it was bought', () => {
+    expect(billKind({ deliveryMode: 'COUNTER' }).label).toBe('SHOP PURCHASE');
+    expect(billKind({ deliveryMode: 'LOCAL' }).label).toBe('ONLINE ORDER · HOME DELIVERY');
+    expect(billKind({ deliveryMode: 'COURIER' }).label).toBe('ONLINE ORDER · COURIER');
   });
 
   it('courier orders show the packing charge instead of delivery', () => {

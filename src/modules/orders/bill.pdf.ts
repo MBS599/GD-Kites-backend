@@ -29,6 +29,13 @@ export const billMoney = (v: number) =>
 const date = (d: Date) =>
   d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
 
+/** The tag at the top of the bill saying where the goods were bought. */
+export function billKind(o: Pick<FullOrder, 'deliveryMode'>) {
+  if (o.deliveryMode === 'COUNTER') return { label: 'SHOP PURCHASE', color: '#1e8b57' };
+  if (o.deliveryMode === 'COURIER') return { label: 'ONLINE ORDER · COURIER', color: BLUE };
+  return { label: 'ONLINE ORDER · HOME DELIVERY', color: BLUE };
+}
+
 /** The rows under the items, in order; zero amounts are left out. */
 export function billTotals(o: FullOrder) {
   const rows: { label: string; amount: number }[] = [{ label: 'Goods', amount: num(o.subtotal) }];
@@ -79,6 +86,13 @@ export function renderBill(o: FullOrder, shop: BillShop): Promise<Buffer> {
   doc.text(`Bill no. ${orderCode(o.number)}`, left, doc.y + 4, { width, align: 'right' });
   doc.text(`${o.deliveryMode === 'COUNTER' ? 'Date' : 'Ordered'} ${date(o.placedAt)}`, { width, align: 'right' });
   if (o.deliveredAt && o.deliveryMode !== 'COUNTER') doc.text(`Delivered ${date(o.deliveredAt)}`, { width, align: 'right' });
+  // Where it was bought, as a coloured tag: shop counter, or an app order delivered / sent by courier.
+  const kind = billKind(o);
+  doc.font('Helvetica-Bold').fontSize(8.5);
+  const tagW = doc.widthOfString(kind.label, { characterSpacing: 0.8 }) + 18;
+  const tagY = doc.y + 6;
+  doc.roundedRect(right - tagW, tagY, tagW, 18, 9).fill(kind.color);
+  doc.fillColor('#ffffff').text(kind.label, right - tagW, tagY + 5, { width: tagW, align: 'center', characterSpacing: 0.8 });
 
   let y = Math.max(doc.y, 130) + 14;
   doc.moveTo(left, y).lineTo(right, y).lineWidth(1).strokeColor(LINE).stroke();

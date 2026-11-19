@@ -47,8 +47,8 @@ export class OrdersService {
     return !!user.driverProfile && o.delivery?.driverId === user.driverProfile.id && o.delivery.status !== 'CANCELLED';
   }
 
-  async list(user: AuthUser, statuses: string[], q?: string, paging: PageQuery = {}, filters: { serviceAreaId?: string; driverId?: string } = {}) {
-    const { serviceAreaId, driverId } = filters;
+  async list(user: AuthUser, statuses: string[], q?: string, paging: PageQuery = {}, filters: { serviceAreaId?: string; driverId?: string; source?: 'shop' | 'online' } = {}) {
+    const { serviceAreaId, driverId, source } = filters;
     const { limit, args } = pageArgs(paging, 100);
     const scope: Prisma.OrderWhereInput =
       user.role === 'ADMIN'
@@ -84,6 +84,7 @@ export class OrdersService {
           statuses.length ? { status: { in: statuses.map((s) => upperSnake(s) as OrderStatus) } } : {},
           serviceAreaId ? { serviceAreaId } : {},
           driverId ? { delivery: { driverId, status: { not: 'CANCELLED' } } } : {},
+          source === 'shop' ? { deliveryMode: 'COUNTER' } : source === 'online' ? { deliveryMode: { not: 'COUNTER' } } : {},
         ],
       },
       include: orderInclude,

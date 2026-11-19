@@ -2060,6 +2060,14 @@ describe('GD Kite Center API (e2e)', () => {
       ).body.order;
       expect(again.customerId ?? again.customer?.id ?? null).toBe(billed.customerId ?? billed.customer?.id ?? null);
       expect((await http.get(`${API}/shop/customer?phone=9876501234`).set(auth(admin)).expect(200)).body.customer.orders).toBe(2);
+
+      // Admin orders: "Shop" lists only counter bills, "Online" only app orders.
+      const shopOnly = (await http.get(`${API}/orders?source=shop&limit=100`).set(auth(admin)).expect(200)).body.orders;
+      expect(shopOnly.map((o: any) => o.id)).toEqual(expect.arrayContaining([billed.id, again.id]));
+      expect(shopOnly.every((o: any) => o.deliveryMode === 'counter')).toBe(true);
+      const online = (await http.get(`${API}/orders?source=online&limit=100`).set(auth(admin)).expect(200)).body.orders;
+      expect(online.some((o: any) => o.deliveryMode === 'counter')).toBe(false);
+      await http.get(`${API}/orders?source=walkin`).set(auth(admin)).expect(400);
     });
 
     it('turns down a QR order and refuses out-of-stock items', async () => {
