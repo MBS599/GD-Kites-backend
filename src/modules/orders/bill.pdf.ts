@@ -33,7 +33,9 @@ const date = (d: Date) =>
 export function billTotals(o: FullOrder) {
   const rows: { label: string; amount: number }[] = [{ label: 'Goods', amount: num(o.subtotal) }];
   if (num(o.discount) > 0) rows.push({ label: `Offer${o.offerTitle ? ` · ${o.offerTitle}` : ''}`, amount: -num(o.discount) });
-  if (o.deliveryMode === 'COURIER') {
+  if (o.deliveryMode === 'COUNTER') {
+    // Bought at the shop: nothing besides the goods.
+  } else if (o.deliveryMode === 'COURIER') {
     if (num(o.packingCharge) > 0) rows.push({ label: 'Packing charge (courier)', amount: num(o.packingCharge) });
   } else {
     rows.push({ label: `Delivery charge · ${o.distanceKm.toFixed(1)} km`, amount: num(o.deliveryCharge) });
@@ -75,8 +77,8 @@ export function renderBill(o: FullOrder, shop: BillShop): Promise<Buffer> {
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(16).text('BILL', left, 48, { width, align: 'right' });
   doc.font('Helvetica').fontSize(9.5).fillColor(MUTED);
   doc.text(`Bill no. ${orderCode(o.number)}`, left, doc.y + 4, { width, align: 'right' });
-  doc.text(`Ordered ${date(o.placedAt)}`, { width, align: 'right' });
-  if (o.deliveredAt) doc.text(`Delivered ${date(o.deliveredAt)}`, { width, align: 'right' });
+  doc.text(`${o.deliveryMode === 'COUNTER' ? 'Date' : 'Ordered'} ${date(o.placedAt)}`, { width, align: 'right' });
+  if (o.deliveredAt && o.deliveryMode !== 'COUNTER') doc.text(`Delivered ${date(o.deliveredAt)}`, { width, align: 'right' });
 
   let y = Math.max(doc.y, 130) + 14;
   doc.moveTo(left, y).lineTo(right, y).lineWidth(1).strokeColor(LINE).stroke();
@@ -88,13 +90,19 @@ export function renderBill(o: FullOrder, shop: BillShop): Promise<Buffer> {
   doc.font('Helvetica').fontSize(9.5).fillColor(MUTED);
   doc.text(o.contactPhone);
   const place = [o.addrLine, o.addrArea, [o.addrCity, o.addrPincode].filter(Boolean).join(' ')].filter((p) => p && p.trim()).join(', ');
-  doc.text(o.deliveryMode === 'COURIER' ? `Sent by courier${o.courierName ? ` via ${o.courierName}` : ''} · ${place}` : place, {
-    width: width * 0.65,
-  });
+  doc.text(
+    o.deliveryMode === 'COUNTER'
+      ? 'Bought at the shop counter'
+      : o.deliveryMode === 'COURIER'
+        ? `Sent by courier${o.courierName ? ` via ${o.courierName}` : ''} · ${place}`
+        : place,
+    { width: width * 0.65 },
+  );
   y = doc.y + 18;
 
   // Items table.
-  const col = { no: left, item: left + 24, qty: left + width * 0.58, rate: left + width * 0.7, amount: left + width * 0.83 };
+  // Wide enough for "10,000 pieces", "Rs 1,250.00" and "Rs 10,00,000.00" on one line.
+  const col = { no: left, item: left + 24, qty: left + width * 0.47, rate: left + width * 0.66, amount: left + width * 0.8 };
   const colW = { item: col.qty - col.item - 10, qty: col.rate - col.qty - 8, rate: col.amount - col.rate - 8, amount: right - col.amount };
   const header = () => {
     doc.rect(left, y, width, 22).fill('#f1f5f8');
@@ -108,10 +116,20 @@ export function renderBill(o: FullOrder, shop: BillShop): Promise<Buffer> {
   };
   header();
   o.items.forEach((it, i) => {
+    const qtyText = `${it.qty.toLocaleString('en-IN')} ${it.unit}${it.qty === 1 ? '' : 's'}`;
+    const rateText = billMoney(num(it.unitPrice));
+    const amountText = billMoney(num(it.lineTotal));
+    // The row is as tall as its tallest cell, so a long name or quantity never runs into the line below.
     doc.font('Helvetica').fontSize(10);
     const nameH = doc.heightOfString(it.productName, { width: colW.item });
     const extra = it.contents ? doc.fontSize(8.5).heightOfString(`Contains: ${it.contents}`, { width: colW.item }) + 2 : 0;
-    const rowH = Math.max(nameH + extra, 14) + 8;
+    doc.fontSize(10);
+    const cellH = Math.max(
+      doc.heightOfString(qtyText, { width: colW.qty }),
+      doc.heightOfString(rateText, { width: colW.rate }),
+      doc.font('Helvetica-Bold').heightOfString(amountText, { width: colW.amount }),
+    );
+    const rowH = Math.max(nameH + extra, cellH, 14) + 8;
     if (y + rowH > doc.page.height - doc.page.margins.bottom - 150) {
       doc.addPage();
       y = doc.page.margins.top;
@@ -121,9 +139,9 @@ export function renderBill(o: FullOrder, shop: BillShop): Promise<Buffer> {
     doc.fillColor(INK).fontSize(10).text(it.productName, col.item, y, { width: colW.item });
     if (it.contents) doc.fillColor(MUTED).fontSize(8.5).text(`Contains: ${it.contents}`, col.item, doc.y + 2, { width: colW.item });
     doc.fillColor(INK).fontSize(10);
-    doc.text(`${it.qty.toLocaleString('en-IN')} ${it.unit}${it.qty === 1 ? '' : 's'}`, col.qty, y, { width: colW.qty, align: 'right' });
-    doc.text(billMoney(num(it.unitPrice)), col.rate, y, { width: colW.rate, align: 'right' });
-    doc.font('Helvetica-Bold').text(billMoney(num(it.lineTotal)), col.amount, y, { width: colW.amount, align: 'right' });
+    doc.font('Helvetica').text(qtyText, col.qty, y, { width: colW.qty, align: 'right' });
+    doc.text(rateText, col.rate, y, { width: colW.rate, align: 'right' });
+    doc.font('Helvetica-Bold').text(amountText, col.amount, y, { width: colW.amount, align: 'right' });
     y += rowH;
     doc.moveTo(left, y - 4).lineTo(right, y - 4).lineWidth(0.5).strokeColor(LINE).stroke();
   });
@@ -144,7 +162,10 @@ export function renderBill(o: FullOrder, shop: BillShop): Promise<Buffer> {
   y += 8;
   row('Total', billMoney(t.total), true, BLUE);
   if (t.paidOnline > 0) row('Paid online', billMoney(t.paidOnline));
-  row(o.status === 'DELIVERED' ? 'Paid in cash on delivery' : 'To pay in cash on delivery', billMoney(t.cash));
+  row(
+    o.deliveryMode === 'COUNTER' ? 'Paid in cash at the shop' : o.status === 'DELIVERED' ? 'Paid in cash on delivery' : 'To pay in cash on delivery',
+    billMoney(t.cash),
+  );
 
   // Footer.
   y = Math.max(y + 24, doc.y + 24);

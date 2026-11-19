@@ -30,6 +30,8 @@ const schema = z
     REVIEW_LOGIN_PHONE: z.string().default(''),
     REVIEW_LOGIN_CODE: z.string().regex(/^(\d{6})?$/, 'REVIEW_LOGIN_CODE must be 6 digits').default(''),
     CORS_ORIGINS: z.string().default('*'),
+    /** The page the shop QR opens on a customer's phone (walk-in orders at the counter). */
+    SHOP_PAGE_URL: z.string().url().default('https://gdkites.in/shop/'),
     /**
      * Google Maps Platform server key: Geocoding API (pin → address), Places API (New)
      * (address search) and Routes API (road distance for the delivery charge, driver trips).

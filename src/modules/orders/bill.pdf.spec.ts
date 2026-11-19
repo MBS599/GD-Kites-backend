@@ -53,6 +53,13 @@ describe('bill PDF', () => {
     expect(billMoney(3149.16)).toBe('Rs 3,149.16');
   });
 
+  it('counter sales: goods only, paid in cash at the shop', async () => {
+    const o = order({ deliveryMode: 'COUNTER', deliveryCharge: d(0), total: d(3000), distanceKm: 0 } as never);
+    expect(billTotals(o).rows.map((r) => r.label)).toEqual(['Goods']);
+    expect(billTotals(o).cash).toBe(3000);
+    expect((await renderBill(o, { phone: null })).subarray(0, 4).toString()).toBe('%PDF');
+  });
+
   it('courier orders show the packing charge instead of delivery', () => {
     const t = billTotals(order({ deliveryMode: 'COURIER', deliveryCharge: d(0), packingCharge: d(200) } as never));
     expect(t.rows.map((r) => r.label)).toEqual(['Goods', 'Packing charge (courier)']);

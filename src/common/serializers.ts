@@ -354,7 +354,7 @@ export function orderOut(o: FullOrder, { driverLocation = false }: { driverLocat
     offerTitle: o.offerTitle,
     deliveryCharge: m(o.deliveryCharge),
     /** 'courier': dropped at a courier office (packing charge, no delivery charge, paid online). */
-    deliveryMode: o.deliveryMode === 'COURIER' ? 'courier' : 'local',
+    deliveryMode: o.deliveryMode === 'COURIER' ? 'courier' : o.deliveryMode === 'COUNTER' ? 'counter' : 'local',
     packingCharge: m(o.packingCharge),
     courierName: o.courierName,
     courierDocket: o.courierDocket,

@@ -1988,6 +1988,104 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('shop counter', () => {
+    it('the QR page lists products, takes a walk-in order and shows when it is billed', async () => {
+      const catalog = (await http.get(`${API}/shop/catalog`).expect(200)).body.products;
+      expect(catalog.length).toBeGreaterThan(0);
+      const kite = catalog.find((p: any) => p.pack === 50) ?? catalog[0];
+      expect(kite).toMatchObject({ id: expect.any(String), price: expect.any(Number), pack: expect.any(Number) });
+      const png = await http.get(`${API}/shop/qr.png`).expect(200);
+      expect(png.headers['content-type']).toContain('image/png');
+      const poster = await http.get(`${API}/shop/qr-poster.pdf`).buffer(true).expect(200);
+      expect(poster.headers['content-type']).toContain('application/pdf');
+
+      // Bad number / nothing chosen.
+      await http.post(`${API}/shop/requests`).send({ name: 'Walk In', phone: '12345', items: [{ productId: kite.id, qty: kite.pack }] }).expect(400);
+      await http.post(`${API}/shop/requests`).send({ name: 'Walk In', phone: '9876501234', items: [] }).expect(400);
+
+      const placed = (
+        await http
+          .post(`${API}/shop/requests`)
+          .send({ name: 'Ravi Kite Corner', phone: '98765 01234', items: [{ productId: kite.id, qty: kite.pack }] })
+          .expect(201)
+      ).body;
+      expect(placed).toMatchObject({ id: expect.any(String), token: expect.any(String), status: 'waiting' });
+      await http.get(`${API}/shop/requests/${placed.id}/status?token=wrong`).expect(404);
+      expect((await http.get(`${API}/shop/requests/${placed.id}/status?token=${placed.token}`).expect(200)).body.status).toBe('waiting');
+
+      // Only admins see and bill the queue.
+      await http.get(`${API}/shop/requests`).set(auth(customer)).expect(403);
+      const queue = (await http.get(`${API}/shop/requests`).set(auth(admin)).expect(200)).body.requests;
+      const req = queue.find((r: any) => r.id === placed.id);
+      expect(req).toMatchObject({ name: 'Ravi Kite Corner', phone: '+91 98765 01234', status: 'waiting' });
+      expect(req.total).toBe(kite.price * kite.pack);
+
+      const billed = (
+        await http
+          .post(`${API}/shop/bills`)
+          .set(auth(admin))
+          .send({ name: req.name, phone: req.phone, items: req.items.map((i: any) => ({ productId: i.productId, qty: i.qty })), requestId: req.id })
+          .expect(201)
+      ).body.order;
+      expect(billed).toMatchObject({ status: 'delivered', deliveryMode: 'counter' });
+      expect(billed.deliveryCharge).toBe(0);
+      expect(billed.total).toBe(kite.price * kite.pack);
+      const status = (await http.get(`${API}/shop/requests/${placed.id}/status?token=${placed.token}`).expect(200)).body;
+      expect(status).toEqual({ status: 'billed', orderCode: billed.code });
+      // Can't be billed twice.
+      await http
+        .post(`${API}/shop/bills`)
+        .set(auth(admin))
+        .send({ name: req.name, phone: req.phone, items: [{ productId: kite.id, qty: kite.pack }], requestId: req.id })
+        .expect(400);
+
+      // The bill goes on WhatsApp; the customer is saved by number and found next time.
+      await app.get(SmsService).drain();
+      await new Promise((r) => setTimeout(r, 300));
+      await app.get(SmsService).drain();
+      const sent = await prisma.smsMessage.findMany({ where: { orderId: billed.id, event: 'orderBill' } });
+      expect(sent).toHaveLength(1);
+      expect(sent[0].to).toBe('919876501234');
+      const found = (await http.get(`${API}/shop/customer?phone=9876501234`).set(auth(admin)).expect(200)).body.customer;
+      expect(found).toMatchObject({ name: 'Ravi Kite Corner', orders: 1 });
+      expect((await http.get(`${API}/shop/customer?phone=9000000999`).set(auth(admin)).expect(200)).body.customer).toBeNull();
+
+      // A counter bill made by the owner for the same number joins that customer.
+      const again = (
+        await http
+          .post(`${API}/shop/bills`)
+          .set(auth(admin))
+          .send({ name: 'Ravi Kite Corner', phone: '+91 9876501234', items: [{ productId: kite.id, qty: kite.pack * 2 }] })
+          .expect(201)
+      ).body.order;
+      expect(again.customerId ?? again.customer?.id ?? null).toBe(billed.customerId ?? billed.customer?.id ?? null);
+      expect((await http.get(`${API}/shop/customer?phone=9876501234`).set(auth(admin)).expect(200)).body.customer.orders).toBe(2);
+    });
+
+    it('turns down a QR order and refuses out-of-stock items', async () => {
+      const catalog = (await http.get(`${API}/shop/catalog`).expect(200)).body.products;
+      const p = catalog[0];
+      const placed = (
+        await http.post(`${API}/shop/requests`).send({ name: 'Turned Down', phone: '9876501299', items: [{ productId: p.id, qty: p.pack }] }).expect(201)
+      ).body;
+      await http.post(`${API}/shop/requests/${placed.id}/reject`).set(auth(admin)).expect(200);
+      expect((await http.get(`${API}/shop/requests/${placed.id}/status?token=${placed.token}`).expect(200)).body.status).toBe('rejected');
+      await http.post(`${API}/shop/requests/${placed.id}/reject`).set(auth(admin)).expect(404);
+
+      await prisma.product.update({ where: { id: p.id }, data: { inStock: false } });
+      try {
+        const res = await http
+          .post(`${API}/shop/bills`)
+          .set(auth(admin))
+          .send({ name: 'Someone', phone: '9876501298', items: [{ productId: p.id, qty: p.pack }] })
+          .expect(400);
+        expect(res.body.error.message).toContain('out of stock');
+      } finally {
+        await prisma.product.update({ where: { id: p.id }, data: { inStock: true } });
+      }
+    });
+  });
+
   describe('account deletion', () => {
     it('is for customers only', async () => {
       await http.delete(`${API}/users/me`).set(auth(driver)).expect(403);

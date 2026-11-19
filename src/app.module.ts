@@ -10,6 +10,7 @@ import { validateEnv } from './config/env';
 import { HealthController } from './health.controller';
 import { PrismaModule } from './prisma/prisma.service';
 import { BillsModule } from './modules/orders/bills';
+import { ShopModule } from './modules/orders/shop';
 import {
   AddressesModule,
   AdminModule,
@@ -54,6 +55,7 @@ class CoreModule {}
     DriversModule,
     DeliveriesModule,
     AdminModule,
+    ShopModule,
   ],
   controllers: [HealthController],
   providers: [

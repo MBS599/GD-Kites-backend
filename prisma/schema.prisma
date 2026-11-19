@@ -195,6 +195,33 @@ enum AddressKind {
 enum DeliveryMode {
   LOCAL
   COURIER
+  /// Sold at the shop counter: no delivery, paid in cash there, billed at once.
+  COUNTER
+}
+
+enum ShopRequestStatus {
+  WAITING
+  BILLED
+  REJECTED
+}
+
+/// An order a walk-in customer placed on their phone after scanning the shop QR. It waits at the
+/// counter until the owner bills it (then it becomes a COUNTER order) or turns it down.
+model ShopRequest {
+  id        String            @id @default(uuid())
+  name      String
+  /// 12-digit Indian mobile, e.g. 919822011122 (WhatsApp, for the bill).
+  phone     String
+  /// [{ productId, qty }] as the customer chose them; prices are taken when billed.
+  items     Json
+  status    ShopRequestStatus @default(WAITING)
+  /// Lets the customer's phone see whether it was billed (no sign-in).
+  token     String
+  orderId   String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([status, createdAt])
 }
 
 model Address {
