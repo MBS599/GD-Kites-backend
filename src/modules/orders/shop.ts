@@ -54,8 +54,8 @@ export class ShopRequestListQuery {
   @IsOptional() @IsIn(['waiting', 'all']) status?: 'waiting' | 'all';
 }
 
-/** Products sell at the counter in the same packs as the app: their minimum, else 50; combos singly. */
-const packOf = (p: Pick<Product, 'isCombo' | 'minQty'>) => (p.isCombo ? 1 : (p.minQty ?? 50));
+/** At the shop any quantity sells (7, 20, …): no packs or minimums there; online keeps them. */
+const packOf = (_p: Pick<Product, 'isCombo' | 'minQty'>) => 1;
 const display = (n: string) => `+91 ${n.slice(2, 7)} ${n.slice(7)}`;
 const imageOf = (p: Pick<Product, 'imageUrl' | 'media'>) => {
   const media = Array.isArray(p.media) ? (p.media as { url?: string; type?: string }[]) : [];
@@ -118,7 +118,7 @@ export class ShopService {
     };
   }
 
-  /** Prices and checks every line like checkout does (current catalogue price, stock, minimums). */
+  /** Prices and checks every line like checkout does (current catalogue price, stock), without the online minimums. */
   private async price(tx: Prisma.TransactionClient, lines: Line[]) {
     const merged = new Map<string, number>();
     for (const l of lines) merged.set(l.productId, (merged.get(l.productId) ?? 0) + l.qty);
@@ -131,7 +131,6 @@ export class ShopService {
       if (!p || !p.isActive) throw new BadRequestException('A product on this bill is no longer sold. Remove it and try again.');
       const name = productDisplayName(p);
       if (!isAvailable(p)) throw new BadRequestException(`${name} is out of stock. Remove it and try again.`);
-      if (p.minQty && qty < p.minQty) throw new BadRequestException(`The minimum for ${name} is ${p.minQty}.`);
       const total = lineTotal(p, qty);
       subtotal = subtotal.add(total);
       rows.push({
