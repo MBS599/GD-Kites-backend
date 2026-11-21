@@ -124,6 +124,8 @@ export class UsersController {
       this.prisma.cart.deleteMany({ where: { userId: user.id } }),
       this.prisma.deviceToken.deleteMany({ where: { userId: user.id } }),
       this.prisma.refreshToken.deleteMany({ where: { userId: user.id } }),
+      this.prisma.problemReport.deleteMany({ where: { userId: user.id } }),
+      this.prisma.errorLog.deleteMany({ where: { userId: user.id } }),
       ...(user.phoneVerified ? [this.prisma.otpChallenge.deleteMany({ where: { phone: user.phoneVerified } })] : []),
       this.prisma.user.update({
         where: { id: user.id },

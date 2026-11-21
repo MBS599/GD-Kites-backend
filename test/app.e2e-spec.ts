@@ -2128,6 +2128,67 @@ describe('GD Kite Center API (e2e)', () => {
     });
   });
 
+  describe('report a problem & error log', () => {
+    it('takes reports from anyone, and the admin lists, filters and resolves them', async () => {
+      await http.post(`${API}/support/reports`).send({ kind: 'bug', message: 'x', source: 'website' }).expect(400);
+      await http.post(`${API}/support/reports`).send({ kind: 'nope', message: 'Map does not load', source: 'website' }).expect(400);
+      const guest = (
+        await http
+          .post(`${API}/support/reports`)
+          .send({ kind: 'bug', message: 'Map does not load on the website', source: 'website', name: 'Visitor', phone: '9876500001', screen: '/' })
+          .expect(201)
+      ).body;
+      expect(guest.ref).toHaveLength(8);
+      const mine = (
+        await http
+          .post(`${API}/support/reports`)
+          .set(auth(customer))
+          .send({ kind: 'delivery', message: 'Driver could not find my shop', source: 'app', screen: '/orders', platform: 'android', appVersion: '1.0.0+68' })
+          .expect(201)
+      ).body;
+
+      await http.get(`${API}/support/reports`).set(auth(customer)).expect(403);
+      const all = (await http.get(`${API}/support/reports?status=open`).set(auth(admin)).expect(200)).body;
+      expect(all.open).toBeGreaterThanOrEqual(2);
+      const r = all.reports.find((x: any) => x.id === mine.id);
+      expect(r).toMatchObject({ kind: 'delivery', source: 'app', status: 'open', user: { id: expect.any(String) } });
+      expect(all.reports.find((x: any) => x.id === guest.id)).toMatchObject({ name: 'Visitor', user: null });
+
+      await http.patch(`${API}/support/reports/${mine.id}`).set(auth(admin)).send({ status: 'resolved', adminNote: 'Called the customer' }).expect(200);
+      const resolved = (await http.get(`${API}/support/reports?status=resolved`).set(auth(admin)).expect(200)).body.reports;
+      expect(resolved.find((x: any) => x.id === mine.id)).toMatchObject({ status: 'resolved', adminNote: 'Called the customer' });
+      const byUser = (await http.get(`${API}/support/reports?userId=${r.user.id}`).set(auth(admin)).expect(200)).body.reports;
+      expect(byUser.every((x: any) => x.user?.id === r.user.id)).toBe(true);
+    });
+
+    it('logs app errors per user; the admin filters by user, source and text', async () => {
+      await http.post(`${API}/support/errors`).send({ source: 'app', errors: [] }).expect(400);
+      await http
+        .post(`${API}/support/errors`)
+        .set(auth(customer))
+        .send({ source: 'app', platform: 'android', appVersion: '1.0.0+68', errors: [{ message: 'Null check operator used on a null value', screen: '/cart', stack: '#0 main' }] })
+        .expect(200);
+      await http.post(`${API}/support/errors`).send({ source: 'website', errors: [{ message: 'TypeError: map is undefined', screen: '/' }] }).expect(200);
+
+      await http.get(`${API}/support/errors`).set(auth(driver)).expect(403);
+      const users = (await http.get(`${API}/support/errors/users`).set(auth(admin)).expect(200)).body.users;
+      const me = users.find((u: any) => u.id && u.count >= 1 && u.role === 'CUSTOMER');
+      expect(me).toBeTruthy();
+      expect(users.some((u: any) => u.id === null)).toBe(true);
+
+      const mine = (await http.get(`${API}/support/errors?userId=${me.id}`).set(auth(admin)).expect(200)).body.errors;
+      expect(mine.length).toBeGreaterThan(0);
+      expect(mine.every((e: any) => e.userId === me.id)).toBe(true);
+      expect(mine[0]).toMatchObject({ source: 'app', screen: '/cart', user: { id: me.id } });
+      const guests = (await http.get(`${API}/support/errors?who=guest&source=website`).set(auth(admin)).expect(200)).body.errors;
+      expect(guests.some((e: any) => e.message.includes('map is undefined'))).toBe(true);
+      const found = (await http.get(`${API}/support/errors?q=null%20check`).set(auth(admin)).expect(200)).body.errors;
+      expect(found.length).toBeGreaterThan(0);
+
+      expect((await http.delete(`${API}/support/errors`).set(auth(admin)).expect(200)).body.deleted).toBeGreaterThan(0);
+    });
+  });
+
   describe('account deletion', () => {
     it('is for customers only', async () => {
       await http.delete(`${API}/users/me`).set(auth(driver)).expect(403);

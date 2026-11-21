@@ -11,6 +11,7 @@ import { HealthController } from './health.controller';
 import { PrismaModule } from './prisma/prisma.service';
 import { BillsModule } from './modules/orders/bills';
 import { ShopModule } from './modules/orders/shop';
+import { SupportModule } from './modules/support/support';
 import {
   AddressesModule,
   AdminModule,
@@ -56,6 +57,7 @@ class CoreModule {}
     DeliveriesModule,
     AdminModule,
     ShopModule,
+    SupportModule,
   ],
   controllers: [HealthController],
   providers: [

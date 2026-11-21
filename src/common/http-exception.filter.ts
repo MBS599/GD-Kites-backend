@@ -1,6 +1,7 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
+import { PrismaService } from '../prisma/prisma.service';
 
 const CODES: Record<number, string> = {
   400: 'bad_request',
@@ -21,10 +22,30 @@ const CODES: Record<number, string> = {
 export class ApiExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger('ApiError');
 
+  constructor(@Optional() private readonly prisma?: PrismaService) {}
+
   catch(exception: unknown, host: ArgumentsHost) {
     const res = host.switchToHttp().getResponse<Response>();
     const { status, message, details, code } = this.describe(exception);
+    if (status >= 500) this.record(exception, host.switchToHttp().getRequest<Request & { user?: { id: string } }>());
     res.status(status).json({ error: { code: code ?? CODES[status] ?? 'error', message, details } });
+  }
+
+  /** Server errors go in the admin's error log too (never blocks or breaks the response). */
+  private record(e: unknown, req: Request & { user?: { id: string } }) {
+    if (!this.prisma) return;
+    const err = e instanceof Error ? e : new Error(String(e));
+    this.prisma.errorLog
+      .create({
+        data: {
+          source: 'server',
+          userId: req?.user?.id ?? null,
+          message: err.message.slice(0, 2000),
+          stack: err.stack?.slice(0, 8000) ?? null,
+          screen: req ? `${req.method} ${(req.originalUrl ?? req.url ?? '').split('?')[0]}`.slice(0, 200) : null,
+        },
+      })
+      .catch(() => undefined);
   }
 
   private describe(e: unknown): { status: number; message: string; details?: unknown; code?: string } {

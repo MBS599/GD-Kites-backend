@@ -653,3 +653,54 @@ model OfferCustomer {
   @@id([offerId, userId])
   @@index([userId])
 }
+
+enum ProblemReportStatus {
+  OPEN
+  RESOLVED
+}
+
+/// "Report a problem" from the app, the web app, the website or the shop QR page.
+model ProblemReport {
+  id         String              @id @default(uuid())
+  /// Signed-in reporter (null on the website / when signed out).
+  userId     String?
+  name       String?
+  phone      String?
+  /// bug | payment | delivery | suggestion | other
+  kind       String
+  message    String
+  /// Where it happened (app screen or page path).
+  screen     String?
+  /// app | web | website | shop
+  source     String
+  platform   String?
+  appVersion String?
+  device     String?
+  imageUrl   String?
+  status     ProblemReportStatus @default(OPEN)
+  adminNote  String?
+  createdAt  DateTime            @default(now())
+  resolvedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([userId])
+}
+
+/// Errors the app, web app and website send in, plus server 500s, for the error log screen.
+model ErrorLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  /// app | web | website | server
+  source     String
+  message    String
+  stack      String?
+  /// App screen, page path or API route.
+  screen     String?
+  platform   String?
+  appVersion String?
+  device     String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+}
