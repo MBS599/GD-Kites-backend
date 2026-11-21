@@ -2080,6 +2080,30 @@ describe('GD Kite Center API (e2e)', () => {
       await http.get(`${API}/orders?source=walkin`).set(auth(admin)).expect(400);
     });
 
+    it('sells any quantity at the shop, below the online minimum too (online keeps it)', async () => {
+      const withMin = await prisma.product.findFirstOrThrow({ where: { minQty: { gt: 1 }, isActive: true, inStock: true, isCombo: false } });
+      const catalog = (await http.get(`${API}/shop/catalog`).expect(200)).body.products;
+      expect(catalog.every((p: any) => p.pack === 1)).toBe(true);
+      for (const qty of [1, 7, 20]) {
+        const order = (
+          await http
+            .post(`${API}/shop/bills`)
+            .set(auth(admin))
+            .send({ name: 'Any Qty', phone: '9876501277', items: [{ productId: withMin.id, qty }] })
+            .expect(201)
+        ).body.order;
+        expect(order.items[0].qty).toBe(qty);
+      }
+      const req = await http
+        .post(`${API}/shop/requests`)
+        .send({ name: 'Any Qty', phone: '9876501277', items: [{ productId: withMin.id, qty: 1 }] })
+        .expect(201);
+      await http.post(`${API}/shop/requests/${req.body.id}/reject`).set(auth(admin)).expect(200);
+      // Online still needs the minimum.
+      await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: withMin.id, qty: 1 }).expect(400);
+    });
+
     it('turns down a QR order and refuses out-of-stock items', async () => {
       const catalog = (await http.get(`${API}/shop/catalog`).expect(200)).body.products;
       const p = catalog[0];
