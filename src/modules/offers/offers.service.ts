@@ -61,8 +61,9 @@ export class OffersService {
   /** The customer's own live offers with uses left, best for the current cart first. */
   async mine(userId: string) {
     const now = new Date();
-    const links = await this.prisma.offerCustomer.findMany({ where: { userId }, include: { offer: true } });
-    const live = links.map((l) => l.offer).filter((o) => isLive(o, now));
+    // Offers chosen for this customer, and offers for every customer.
+    const offers = await this.prisma.offer.findMany({ where: { OR: [{ forEveryone: true }, { customers: { some: { userId } } }] } });
+    const live = offers.filter((o) => isLive(o, now));
     if (live.length === 0) return [];
     const [subtotal, used] = await Promise.all([
       this.cartSubtotal(userId),
@@ -86,7 +87,15 @@ export class OffersService {
   async applyAtCheckout(tx: Tx, userId: string, offerId: string, subtotal: Prisma.Decimal) {
     const locked = await tx.$queryRaw<{ offerId: string }[]>`
       SELECT "offerId" FROM "OfferCustomer" WHERE "offerId" = ${offerId} AND "userId" = ${userId} FOR UPDATE`;
-    const offer = locked.length ? await tx.offer.findUnique({ where: { id: offerId } }) : null;
+    let offer = locked.length ? await tx.offer.findUnique({ where: { id: offerId } }) : null;
+    if (!offer) {
+      // An offer for every customer has no row per customer: lock the customer instead.
+      const everyone = await tx.offer.findFirst({ where: { id: offerId, forEveryone: true } });
+      if (everyone) {
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+        offer = everyone;
+      }
+    }
     if (!offer) throw new NotFoundException('This offer is not available on your account.');
     if (!isLive(offer)) throw new ConflictException(`The offer "${offer.title}" has ended. Place the order without it.`);
     if ((await this.used(tx, offerId, userId)) >= offer.usesPerCustomer) {

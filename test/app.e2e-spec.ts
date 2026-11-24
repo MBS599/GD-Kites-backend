@@ -1108,6 +1108,41 @@ describe('GD Kite Center API (e2e)', () => {
         for (const id of ids) await http.delete(`${API}/admin/offers/${id}`).set(auth(admin)).expect(204);
       }
     });
+
+    it('an offer for every customer: everyone sees and uses it once; customers can be notified', async () => {
+      const ganesh = await login('shreeganesh.traders@gmail.com');
+      const kite = (await http.get(`${API}/products?q=Premium`).set(auth(customer))).body.products[0];
+      const addresses = (await http.get(`${API}/addresses`).set(auth(customer))).body.addresses;
+      let id = '';
+      try {
+        const created = (await http.post(`${API}/admin/offers`).set(auth(admin))
+          .send({ title: 'Sankranti ₹75 off', kind: 'flat', value: 75, customerIds: [], forEveryone: true, notify: true }).expect(201)).body;
+        id = created.offer.id;
+        expect(created.offer).toMatchObject({ forEveryone: true, customers: [], notifiedAt: expect.any(String) });
+        expect(created.notified.customers).toBeGreaterThanOrEqual(2);
+
+        // Both customers see it, with nobody picked.
+        await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 100 }).expect(201);
+        expect((await http.get(`${API}/offers`).set(auth(customer))).body.offers.map((o: any) => o.id)).toContain(id);
+        expect((await http.get(`${API}/offers`).set(auth(ganesh))).body.offers.map((o: any) => o.id)).toContain(id);
+
+        const order = (await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id, offerId: id }).expect(201)).body.order;
+        expect(order).toMatchObject({ discount: 75, offerTitle: 'Sankranti ₹75 off' });
+        await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: kite.id, qty: 100 }).expect(201);
+        await http.post(`${API}/orders`).set(auth(customer)).send({ addressId: addresses[0].id, offerId: id }).expect(409);
+        await http.post(`${API}/orders/${order.id}/cancel`).set(auth(customer)).expect(200);
+
+        // Send again later; a switched-off offer can't be sent; customers can't send.
+        expect((await http.post(`${API}/admin/offers/${id}/notify`).set(auth(admin)).expect(200)).body.notified.customers).toBeGreaterThanOrEqual(2);
+        await http.post(`${API}/admin/offers/${id}/notify`).set(auth(customer)).expect(403);
+        await http.patch(`${API}/admin/offers/${id}`).set(auth(admin)).send({ isActive: false }).expect(200);
+        await http.post(`${API}/admin/offers/${id}/notify`).set(auth(admin)).expect(400);
+        expect((await http.get(`${API}/offers`).set(auth(ganesh))).body.offers.map((o: any) => o.id)).not.toContain(id);
+      } finally {
+        await http.delete(`${API}/cart/items/${kite.id}`).set(auth(customer));
+        if (id) await http.delete(`${API}/admin/offers/${id}`).set(auth(admin)).expect(204);
+      }
+    });
   });
 
   describe('service areas (geofence)', () => {
@@ -2186,6 +2221,36 @@ describe('GD Kite Center API (e2e)', () => {
       expect(found.length).toBeGreaterThan(0);
 
       expect((await http.delete(`${API}/support/errors`).set(auth(admin)).expect(200)).body.deleted).toBeGreaterThan(0);
+    });
+  });
+
+  describe('daily sales summary and dashboard', () => {
+    it('the owner number is a setting; the summary previews, sends on WhatsApp and matches the dashboard', async () => {
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ dailySummaryTo: '12345' }).expect(400);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ dailySummaryHour: 24 }).expect(400);
+      await http.patch(`${API}/settings`).set(auth(customer)).send({ dailySummaryTo: '9860838860' }).expect(403);
+      const set = (
+        await http.patch(`${API}/settings`).set(auth(admin)).send({ dailySummaryTo: '9860838860, +91 98220 11122', dailySummaryHour: 21 }).expect(200)
+      ).body.settings;
+      expect(set).toMatchObject({ dailySummaryTo: ['9860838860', '9822011122'], dailySummaryHour: 21 });
+
+      await http.get(`${API}/reports/daily-summary`).set(auth(customer)).expect(403);
+      const preview = (await http.get(`${API}/reports/daily-summary`).set(auth(admin)).expect(200)).body;
+      expect(preview.text).toContain('Daily summary');
+      const dash = (await http.get(`${API}/admin/dashboard`).set(auth(admin)).expect(200)).body.stats;
+      expect(preview.summary.sales).toBeCloseTo(dash.sales, 2);
+      expect(dash.online.sales + dash.shop.sales).toBeCloseTo(dash.sales, 2);
+      expect(dash).toMatchObject({ cashCollected: expect.any(Number), cashBy: expect.any(Array), newCustomers: expect.any(Number), qrWaiting: expect.any(Number) });
+
+      const sent = (await http.post(`${API}/reports/daily-summary/send`).set(auth(admin)).expect(200)).body.results;
+      expect(sent.map((r: any) => r.to)).toEqual(['919860838860', '919822011122']);
+      const logged = await prisma.smsMessage.findFirst({ where: { event: 'dailySummary', to: '919860838860' }, orderBy: { createdAt: 'desc' } });
+      expect(logged?.body).toContain('*Cash collected: Rs');
+
+      // Empty turns it off.
+      expect((await http.patch(`${API}/settings`).set(auth(admin)).send({ dailySummaryTo: '' }).expect(200)).body.settings.dailySummaryTo).toEqual([]);
+      await http.post(`${API}/reports/daily-summary/send`).set(auth(admin)).expect(400);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ dailySummaryHour: 22 }).expect(200);
     });
   });
 

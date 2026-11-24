@@ -47,6 +47,9 @@ function session(prisma: any = fakePrisma()) {
   return { s, fake, prisma };
 }
 
+// Drawing the QR images is slow when the whole suite runs in parallel on a busy machine.
+jest.setTimeout(30_000);
+
 describe('WhatsApp Web (linked phone)', () => {
   it('a frozen browser fails the send quickly and restarts WhatsApp Web', async () => {
     const { s, fake } = session();

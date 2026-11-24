@@ -141,6 +141,12 @@ model AppSettings {
   updateMessage         String?
   /// The app is public on Google Play: website-APK installs are sent to Play to update.
   playStoreLive         Boolean      @default(false)
+  /// Daily sales summary on WhatsApp: comma-separated numbers (91XXXXXXXXXX); null/empty = off.
+  dailySummaryTo        String?
+  /// IST hour (0-23) the daily summary goes out; default 10 PM.
+  dailySummaryHour      Int          @default(22)
+  /// IST date (YYYY-MM-DD) of the last summary sent, so a restart never sends it twice.
+  dailySummarySentOn    String?
   updatedAt             DateTime     @updatedAt
 }
 
@@ -636,6 +642,10 @@ model Offer {
   /// Orders each customer can use it on (cancelled orders give the use back).
   usesPerCustomer Int             @default(1)
   isActive        Boolean         @default(true)
+  /// Every customer can use it (also ones who sign up later); [customers] is then unused.
+  forEveryone     Boolean         @default(false)
+  /// Last time customers were sent a push notification about it.
+  notifiedAt      DateTime?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   customers       OfferCustomer[]

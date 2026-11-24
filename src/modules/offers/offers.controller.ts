@@ -21,6 +21,7 @@ import {
 import { Prisma, type Offer } from '@prisma/client';
 import { CurrentUser, Roles, type AuthUser } from '../../common/auth.decorators';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PushService } from '../sms/push.service';
 import { isLive, OffersService } from './offers.service';
 
 export class CreateOfferDto {
@@ -38,8 +39,12 @@ export class CreateOfferDto {
   /** Orders each customer can use it on. */
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1000) usesPerCustomer?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
-  /** The only customers who can see and use it. The list replaces the previous one. */
+  /** The only customers who can see and use it. The list replaces the previous one. Ignored for [forEveryone]. */
   @IsArray() @ArrayMaxSize(5000) @IsUUID('all', { each: true }) customerIds: string[];
+  /** Every customer can use it, also ones who sign up later. */
+  @IsOptional() @IsBoolean() forEveryone?: boolean;
+  /** After saving, send its customers a push notification about it (only while it is live). */
+  @IsOptional() @IsBoolean() notify?: boolean;
 }
 
 export class UpdateOfferDto extends PartialType(CreateOfferDto) {}
@@ -75,6 +80,10 @@ function adminOfferOut(o: AdminOffer, usage: { orders: number; discount: number 
     endsAt: o.endsAt?.toISOString() ?? null,
     usesPerCustomer: o.usesPerCustomer,
     isActive: o.isActive,
+    /** Every customer can use it. */
+    forEveryone: o.forEveryone,
+    /** Last time customers were notified about it. */
+    notifiedAt: o.notifiedAt?.toISOString() ?? null,
     /** Switched on and inside its dates. */
     live: isLive(o),
     customers: o.customers.map((c) => customerOut(c.user)),
@@ -82,6 +91,20 @@ function adminOfferOut(o: AdminOffer, usage: { orders: number; discount: number 
     usedOrders: usage.orders,
     discountGiven: usage.discount,
     createdAt: o.createdAt.toISOString(),
+  };
+}
+
+/** The notification customers get about an offer, e.g. "10% off (up to ₹500) on orders above ₹2,000 · till 31 Dec". */
+export function offerPush(o: Pick<Offer, 'id' | 'title' | 'description' | 'kind' | 'value' | 'maxDiscount' | 'minOrder' | 'endsAt'>) {
+  const rs = (d: Prisma.Decimal | number) => `₹${Number(d).toLocaleString('en-IN')}`;
+  const off = o.kind === 'PERCENT' ? `${Number(o.value)}% off${o.maxDiscount != null ? ` (up to ${rs(o.maxDiscount)})` : ''}` : `${rs(o.value)} off`;
+  const until = o.endsAt ? ` · till ${o.endsAt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })}` : '';
+  const min = Number(o.minOrder) > 0 ? ` on orders above ${rs(o.minOrder)}` : '';
+  const more = o.description?.trim() ? ` ${o.description.trim()}` : '';
+  return {
+    title: `New offer: ${o.title}`,
+    body: `${off}${min}${until}.${more}`.slice(0, 230),
+    data: { type: 'offer', offerId: o.id },
   };
 }
 
@@ -106,7 +129,10 @@ export class OffersController {
 @Roles('ADMIN')
 @Controller('admin/offers')
 export class OffersAdminController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly push: PushService,
+  ) {}
 
   private readonly include = { customers: { include: { user: { select: customerSelect } }, orderBy: { createdAt: 'asc' } } } as const;
 
@@ -171,10 +197,11 @@ export class OffersAdminController {
     const data = (await this.data(dto, null)) as Prisma.OfferCreateInput;
     const id = await this.prisma.$transaction(async (tx) => {
       const o = await tx.offer.create({ data });
-      await this.setCustomers(o.id, dto.customerIds, tx);
+      if (!dto.forEveryone) await this.setCustomers(o.id, dto.customerIds, tx);
       return o.id;
     });
-    return { offer: await this.out(id) };
+    const notified = dto.notify ? await this.notifyAbout(id) : null;
+    return { offer: await this.out(id), notified };
   }
 
   @Patch(':id')
@@ -184,9 +211,31 @@ export class OffersAdminController {
     const data = await this.data(dto, existing);
     await this.prisma.$transaction(async (tx) => {
       await tx.offer.update({ where: { id }, data });
-      if (dto.customerIds) await this.setCustomers(id, dto.customerIds, tx);
+      if (dto.customerIds && !(dto.forEveryone ?? existing.forEveryone)) await this.setCustomers(id, dto.customerIds, tx);
     });
-    return { offer: await this.out(id) };
+    const notified = dto.notify ? await this.notifyAbout(id) : null;
+    return { offer: await this.out(id), notified };
+  }
+
+  /** Sends the offer's customers (or every customer) a push notification about it now. */
+  @Post(':id/notify')
+  @HttpCode(200)
+  async notify(@Param('id', ParseUUIDPipe) id: string) {
+    const exists = await this.prisma.offer.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) throw new NotFoundException('Offer not found.');
+    return { notified: await this.notifyAbout(id), offer: await this.out(id) };
+  }
+
+  /** Push to the customers who can use the offer: how many there are, and how many have the app. */
+  private async notifyAbout(id: string) {
+    const o = await this.prisma.offer.findUniqueOrThrow({ where: { id }, include: { customers: { select: { userId: true } } } });
+    if (!isLive(o)) throw new BadRequestException('Only a live offer (switched on and inside its dates) can be sent to customers.');
+    const ids = o.forEveryone
+      ? (await this.prisma.user.findMany({ where: { role: 'CUSTOMER', isActive: true }, select: { id: true } })).map((u) => u.id)
+      : (await this.prisma.user.findMany({ where: { id: { in: o.customers.map((c) => c.userId) }, isActive: true }, select: { id: true } })).map((u) => u.id);
+    const { reachable } = await this.push.notifyUsers(ids, offerPush(o));
+    await this.prisma.offer.update({ where: { id }, data: { notifiedAt: new Date() } });
+    return { customers: ids.length, withApp: reachable };
   }
 
   /** Orders that used it keep their discount and the offer's title. */
@@ -219,6 +268,7 @@ export class OffersAdminController {
       endsAt,
       ...(dto.usesPerCustomer !== undefined ? { usesPerCustomer: dto.usesPerCustomer } : {}),
       ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+      ...(dto.forEveryone !== undefined ? { forEveryone: dto.forEveryone } : {}),
     };
   }
 

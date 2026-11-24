@@ -100,6 +100,34 @@ export const SMS_TEMPLATES = {
     long: [2],
   },
 
+  /**
+   * Nightly sales summary to the owner (Settings → Daily sales summary).
+   * [date, sales, orders + change, online Rs, online orders, shop Rs, shop orders, profit line,
+   *  cash collected, cash by collector, delivered, cancelled, still open, top products]
+   */
+  dailySummary: {
+    audience: 'admin',
+    text: [
+      '*GD Kite Center · Daily summary*',
+      '{#var#}',
+      '',
+      '*Sales: Rs {#var#}* ({#var#})',
+      '• Online: Rs {#var#} ({#var#})',
+      '• Shop counter: Rs {#var#} ({#var#})',
+      '{#var#}',
+      '',
+      '*Cash collected: Rs {#var#}*',
+      '{#var#}',
+      '',
+      '*Delivered today:* {#var#} · *Cancelled:* {#var#}',
+      '*Still open:* {#var#}',
+      '',
+      '*Top products today*',
+      '{#var#}',
+    ].join('\n'),
+    long: [2, 7, 9, 12, 13],
+  },
+
   /** Admin "send test message" from Settings. */
   test: {
     audience: 'admin',

@@ -10,6 +10,7 @@ import type { AppSettings, VehicleType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { deliveryTariffOf } from '../../common/rates';
 import { vehicleTypeOut } from '../../common/serializers';
+import { summaryNumbers } from '../reports/daily-summary';
 import type { Tariff } from '../../domain/pricing';
 
 /** Hard ceiling (also enforced by a DB CHECK constraint). */
@@ -77,6 +78,15 @@ export class UpdateSettingsDto {
   updateMessage?: string | null;
   /** The app is public on Google Play: website-APK installs update from Play. */
   @IsOptional() @IsBoolean() playStoreLive?: boolean;
+  /** Daily sales summary on WhatsApp: up to 3 mobile numbers, comma-separated; empty turns it off. */
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() || null : value))
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @MaxLength(60)
+  dailySummaryTo?: string | null;
+  /** IST hour the daily summary goes out (0-23). Default 22 (10 PM). */
+  @IsOptional() @IsInt() @Min(0) @Max(23) dailySummaryHour?: number;
 }
 
 const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
@@ -91,6 +101,9 @@ const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
   androidMinBuild: s.androidMinBuild,
   updateMessage: s.updateMessage,
   playStoreLive: s.playStoreLive,
+  /** Daily sales summary numbers as 10 digits, e.g. ["9860838860"]; empty = off. */
+  dailySummaryTo: summaryNumbers(s.dailySummaryTo).map((n) => n.slice(2)),
+  dailySummaryHour: s.dailySummaryHour,
   courierEnabled: s.courierEnabled,
   courierPackingCharge: s.courierPackingCharge.toNumber(),
 });
@@ -116,6 +129,13 @@ export class SettingsController {
     if (dto.deliveryVehicleTypeId) {
       const v = await this.prisma.vehicleType.findUnique({ where: { id: dto.deliveryVehicleTypeId } });
       if (!v || !v.isActive) throw new BadRequestException('Choose an active vehicle type for the delivery charge.');
+    }
+    if (dto.dailySummaryTo) {
+      const parts = dto.dailySummaryTo.split(/[,;]+/).filter((p) => p.trim());
+      const numbers = summaryNumbers(dto.dailySummaryTo);
+      if (numbers.length !== parts.length) throw new BadRequestException('Enter 10-digit mobile numbers for the daily summary, separated by commas.');
+      if (numbers.length > 3) throw new BadRequestException('Up to 3 numbers can get the daily summary.');
+      dto.dailySummaryTo = [...new Set(numbers)].join(',');
     }
     const s = await this.prisma.appSettings.upsert({
       where: { id: 1 },

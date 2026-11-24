@@ -258,6 +258,17 @@ export class SmsService {
     this.toUser(user, 'driverWelcome', [firstName(user.name), user.email ?? 'your mobile number']);
   }
 
+  /** The nightly sales summary to the owner's number(s); waits for each result. */
+  async dailySummary(to: string[], vars: (string | number)[]) {
+    const results = [];
+    for (const raw of to) {
+      const n = normalizeIndianMobile(raw);
+      const job: Job = { event: 'dailySummary', to: n ?? raw, vars };
+      results.push(n ? await this.process(job, { dedupe: false }) : await this.record(job, 'SKIPPED', 'Invalid Indian mobile number'));
+    }
+    return results;
+  }
+
   /** Admin test from Settings; bypasses dedupe and opt-out, waits for the result. */
   async sendTest(phone: string, userId: string) {
     const to = normalizeIndianMobile(phone);

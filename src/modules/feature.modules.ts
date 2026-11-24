@@ -28,6 +28,7 @@ import { DispatchService } from './orders/dispatch.service';
 import { RealtimeGateway } from './realtime/realtime.gateway';
 import { RealtimeService } from './realtime/realtime.service';
 import { ReportsController } from './reports/reports.controller';
+import { DailySummaryController, DailySummaryService } from './reports/daily-summary';
 import { UploadsController } from './uploads/uploads.controller';
 import { ServiceAreasController } from './service-areas/service-areas.controller';
 import { ServiceAreasService } from './service-areas/service-areas.service';
@@ -126,5 +127,8 @@ export class DriversModule {}
 export class DeliveriesModule {}
 
 /** Admin dashboard and reports. */
-@Module({ controllers: [AdminController, TeamController, UsersAdminController, ReportsController] })
+@Module({
+  controllers: [AdminController, TeamController, UsersAdminController, ReportsController, DailySummaryController],
+  providers: [DailySummaryService],
+})
 export class AdminModule {}

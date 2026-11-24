@@ -13,6 +13,11 @@ export function startOfYesterday(now = new Date()): Date {
   return new Date(startOfToday(now).getTime() - DAY_MS);
 }
 
+/** Hour of the day in IST (0-23). */
+export function istHour(d: Date): number {
+  return new Date(d.getTime() + IST_OFFSET_MS).getUTCHours();
+}
+
 /** IST calendar date (YYYY-MM-DD) for grouping reports. */
 export function istDateKey(d: Date): string {
   return new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);

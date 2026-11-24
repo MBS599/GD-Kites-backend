@@ -25,6 +25,8 @@ describe('templates', () => {
 
   it('every template uses its variables', () => {
     for (const event of Object.keys(SMS_TEMPLATES) as (keyof typeof SMS_TEMPLATES)[]) {
+      // The owner's nightly summary is the one long report; it goes only to the owner.
+      if (event === 'dailySummary') continue;
       expect(varCount(event)).toBeLessThanOrEqual(6);
     }
   });

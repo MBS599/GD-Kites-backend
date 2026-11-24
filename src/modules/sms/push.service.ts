@@ -86,6 +86,23 @@ export class PushService {
     void this.sendToUser(userId, message).catch((e) => this.logger.warn(`push: ${String(e)}`));
   }
 
+  /**
+   * The same message to many users (e.g. a new offer). Waits until all are sent, a few at a
+   * time; returns how many of them have the app with notifications on.
+   */
+  async notifyUsers(userIds: string[], message: PushMessage) {
+    const users = await this.prisma.deviceToken.groupBy({ by: ['userId'], where: { userId: { in: userIds } } });
+    if (!this.enabled) return { reachable: users.length, sent: 0 };
+    const queue = users.map((u) => u.userId);
+    const worker = async () => {
+      for (let id = queue.shift(); id; id = queue.shift()) {
+        await this.sendToUser(id, message).catch((e) => this.logger.warn(`push: ${String(e)}`));
+      }
+    };
+    await Promise.all(Array.from({ length: 5 }, worker));
+    return { reachable: users.length, sent: users.length };
+  }
+
   private async sendToUser(userId: string, message: PushMessage) {
     const devices = await this.prisma.deviceToken.findMany({ where: { userId } });
     if (!devices.length) return;

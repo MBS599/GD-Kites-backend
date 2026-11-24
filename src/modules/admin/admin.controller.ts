@@ -1,3 +1,4 @@
+import { cashCollected, salesBySource } from '../reports/daily-summary';
 import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsOptional, Matches } from 'class-validator';
@@ -113,6 +114,20 @@ export class AdminController {
         GROUP BY i."productName" ORDER BY SUM(i."lineTotal") DESC LIMIT 5`,
       this.prisma.order.findMany({ where: { ...live, placedAt: inPeriod }, distinct: ['customerId'], select: { customerId: true } }),
     ]);
+    // Online vs shop counter, cash collected, new customers, QR orders waiting.
+    const [source, cash, qrWaiting, newCustomers] = await Promise.all([
+      salesBySource(this.prisma, start, end),
+      cashCollected(this.prisma, start, end),
+      this.prisma.shopRequest.count({ where: { status: 'WAITING' } }),
+      customers.length
+        ? this.prisma.$queryRaw<{ n: number }[]>`
+            SELECT COUNT(*)::int AS n FROM (
+              SELECT o."customerId" FROM "Order" o
+              WHERE o.status <> 'CANCELLED' AND o."customerId" = ANY(${customers.map((c) => c.customerId)}::text[])
+              GROUP BY o."customerId" HAVING MIN(o."placedAt") >= ${start}
+            ) firsts`.then((r) => r[0]?.n ?? 0)
+        : Promise.resolve(0),
+    ]);
     const byKey = new Map(buckets.map((b) => [b.k, b]));
     const trend = trendKeys(start, end, unit).map((k) => ({
       key: k,
@@ -153,6 +168,16 @@ export class AdminController {
         /** Sales per hour / day / month across the period (zero-filled). */
         trendUnit: unit,
         trend,
+        /** Sales of orders placed in the period: app orders and shop counter bills. */
+        online: source.online,
+        shop: source.shop,
+        /** Cash paid for orders delivered in the period, by who collected it. */
+        cashCollected: cash.total,
+        cashBy: cash.by,
+        /** Customers whose first order was in the period. */
+        newCustomers,
+        /** Shop QR orders waiting at the counter (right now). */
+        qrWaiting,
         /** Best sellers in the period by revenue. */
         topProducts: top.map((t) => ({ name: t.name, qty: t.qty, revenue: Number(t.revenue) })),
       },
