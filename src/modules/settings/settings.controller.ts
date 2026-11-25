@@ -195,10 +195,17 @@ export class AppVersionController {
       select: { androidMinBuild: true, updateMessage: true, playStoreLive: true },
     });
     const latest = await this.published();
+    const viaPlay = s?.playStoreLive ?? false;
     return {
       android: {
-        /** Newest published build (null until CI has published one). */
-        latestBuild: latest?.build ?? null,
+        /**
+         * Newest build installed apps should move to (null = none). Live on Google Play: null, so
+         * website installs follow minBuild (the build the admin marked as live on Play) instead of
+         * the newest website APK, which Play doesn't have yet (Play can't update them to it).
+         */
+        latestBuild: viaPlay ? null : (latest?.build ?? null),
+        /** Newest build CI published on the website, for the admin's App updates screen. */
+        websiteBuild: latest?.build ?? null,
         latestVersion: latest?.version ?? null,
         publishedAt: latest?.publishedAt ?? null,
         /** Builds below this must update before the app can be used (0 = no force update). */

@@ -1960,7 +1960,11 @@ describe('GD Kite Center API (e2e)', () => {
       expect((await http.patch(`${API}/settings`).set(auth(admin)).send({ playStoreLive: true }).expect(200)).body.settings).toMatchObject({
         playStoreLive: true,
       });
-      expect((await http.get(`${API}/app/version`)).body.android.playStoreLive).toBe(true);
+      const live = (await http.get(`${API}/app/version`)).body.android;
+      expect(live.playStoreLive).toBe(true);
+      // Website installs then follow the build marked live on Play (minBuild), not the website APK.
+      expect(live.latestBuild).toBeNull();
+      expect(live).toHaveProperty('websiteBuild');
       await http.patch(`${API}/settings`).set(auth(admin)).send({ playStoreLive: false }).expect(200);
     });
   });
