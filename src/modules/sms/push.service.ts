@@ -14,7 +14,7 @@ export interface PushMessage {
 
 /** Push text per event, from the same variables as the SMS/WhatsApp message. */
 const PUSH: Partial<Record<SmsEvent, (v: string[]) => Omit<PushMessage, 'data'>>> = {
-  orderPlaced: ([, code, , amount]) => ({ title: 'Order placed', body: `${code} · Rs ${amount}. We will confirm it shortly.` }),
+  orderPlaced: ([, code, , amount]) => ({ title: 'Order placed', body: `${code} · ₹${amount}. We will confirm it shortly.` }),
   orderConfirmed: ([, code]) => ({ title: 'Order confirmed', body: `${code} is confirmed and being packed.` }),
   driverAssigned: ([, code, , driver]) => ({ title: 'Driver assigned', body: `${driver} will deliver ${code}.` }),
   outForDelivery: ([, code, , driver, , otp]) => ({
@@ -24,12 +24,41 @@ const PUSH: Partial<Record<SmsEvent, (v: string[]) => Omit<PushMessage, 'data'>>
   deliveryOtp: ([otp, code]) => ({ title: 'Delivery code', body: `Code for ${code}: ${otp}. Share it only when you receive your order.` }),
   courierOnTheWay: ([, code, , courier]) => ({ title: 'On the way to the courier', body: `${code} is packed and going to ${courier}.` }),
   courierDropped: ([, code, , courier, docket]) => ({ title: 'Handed to the courier', body: `${code} is at ${courier}. Docket: ${docket}` }),
-  orderDelivered: ([, code, , amount]) => ({ title: 'Delivered', body: `${code} delivered (Rs ${amount}). Thank you!` }),
+  orderDelivered: ([, code, , amount]) => ({ title: 'Delivered', body: `${code} delivered (₹${amount}). Thank you!` }),
   orderCancelled: ([, code, , reason]) => ({ title: 'Order cancelled', body: `${code}: ${reason}` }),
   deliveryAssigned: ([, code, name, area]) => ({ title: 'New delivery', body: `${code} for ${name}, ${area}` }),
   deliveryRemoved: ([code]) => ({ title: 'Delivery removed', body: `${code} is no longer assigned to you.` }),
-  adminNewOrder: ([code, name, , amount]) => ({ title: 'New order', body: `${code} from ${name} · Rs ${amount}` }),
+  adminNewOrder: ([code, name, , amount]) => ({ title: 'New order', body: `${code} from ${name} · ₹${amount}` }),
 };
+
+const rupees = (v: { toString(): string } | number) => `₹${Math.round(Number(v.toString())).toLocaleString('en-IN')}`;
+
+/** Shop staff: a walk-in customer sent an order from the counter QR. */
+export function shopRequestPush(requestId: string, name: string, lines: number, total: { toString(): string } | number): PushMessage {
+  return {
+    title: 'New counter order',
+    body: `${name} · ${lines} ${lines === 1 ? 'item' : 'items'} · ${rupees(total)}. Waiting at the counter.`,
+    data: { type: 'shopRequest', requestId },
+  };
+}
+
+/** Customer: billed at the shop counter (paid in cash there). Tap opens the purchase. */
+export function shopBillPush(orderId: string, number: number, total: { toString(): string } | number): PushMessage {
+  return {
+    title: 'Thank you for shopping',
+    body: `GD${number} · ${rupees(total)} paid at the shop. Tap to see your bill.`,
+    data: { type: 'shopBill', orderId },
+  };
+}
+
+/** Customer: the shop turned down their counter QR order. */
+export function shopRejectedPush(): PushMessage {
+  return {
+    title: 'Counter order not billed',
+    body: 'The shop could not bill your QR order. Please ask at the counter.',
+    data: { type: 'shopRejected' },
+  };
+}
 
 export function pushFor(event: SmsEvent, vars: string[], orderId?: string): PushMessage | null {
   const make = PUSH[event];

@@ -147,6 +147,8 @@ model AppSettings {
   dailySummaryHour      Int          @default(22)
   /// IST date (YYYY-MM-DD) of the last summary sent, so a restart never sends it twice.
   dailySummarySentOn    String?
+  /// "Buy at the shop" in the customer app: allowed within this many metres of the shop (the hub).
+  shopRadiusM           Int          @default(100)
   updatedAt             DateTime     @updatedAt
 }
 

@@ -87,6 +87,8 @@ export class UpdateSettingsDto {
   dailySummaryTo?: string | null;
   /** IST hour the daily summary goes out (0-23). Default 22 (10 PM). */
   @IsOptional() @IsInt() @Min(0) @Max(23) dailySummaryHour?: number;
+  /** "Buy at the shop" in the app: allowed within this many metres of the shop. Default 100. */
+  @IsOptional() @IsInt() @Min(20) @Max(5000) shopRadiusM?: number;
 }
 
 const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
@@ -104,6 +106,7 @@ const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
   /** Daily sales summary numbers as 10 digits, e.g. ["9860838860"]; empty = off. */
   dailySummaryTo: summaryNumbers(s.dailySummaryTo).map((n) => n.slice(2)),
   dailySummaryHour: s.dailySummaryHour,
+  shopRadiusM: s.shopRadiusM,
   courierEnabled: s.courierEnabled,
   courierPackingCharge: s.courierPackingCharge.toNumber(),
 });

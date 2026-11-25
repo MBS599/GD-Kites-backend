@@ -2024,6 +2024,42 @@ describe('GD Kite Center API (e2e)', () => {
   });
 
   describe('shop counter', () => {
+    it('"Buy at the shop" in the app: only inside the shop, the cart goes to the counter', async () => {
+      const hub = await prisma.serviceArea.findFirstOrThrow({ where: { isActive: true }, orderBy: { createdAt: 'asc' } });
+      const product = await prisma.product.findFirstOrThrow({ where: { isActive: true, inStock: true, isCombo: false, isDamaged: false } });
+      const me = await prisma.user.update({ where: { id: customer.user.id }, data: { phone: '+91 98765 04321' } });
+      const number = me.phoneVerified ?? '919876504321'; // a verified number wins over the typed one
+      await prisma.shopRequest.deleteMany({ where: { phone: number } });
+      await http.delete(`${API}/cart`).set(auth(customer)).expect(200);
+      const pack = Math.max(product.minQty ?? 1, 1);
+      await http.post(`${API}/cart/items`).set(auth(customer)).send({ productId: product.id, qty: pack }).expect((r) => expect(r.status).toBeLessThan(300));
+
+      // Not for drivers/admins; outside the shop radius (default 100 m): refused, cart kept.
+      await http.post(`${API}/shop/app-requests`).set(auth(admin)).send({ lat: hub.hubLat, lng: hub.hubLng }).expect(403);
+      const far = await http.post(`${API}/shop/app-requests`).set(auth(customer)).send({ lat: hub.hubLat + 0.01, lng: hub.hubLng }).expect(400);
+      expect(far.body.error.message).toContain('within 100 m');
+      expect((await http.get(`${API}/cart`).set(auth(customer)).expect(200)).body.cart.items).toHaveLength(1);
+
+      // In the shop (~30 m away): a waiting counter order with the account's name and number; cart emptied.
+      const placed = (
+        await http.post(`${API}/shop/app-requests`).set(auth(customer)).send({ lat: hub.hubLat + 0.00027, lng: hub.hubLng }).expect(201)
+      ).body;
+      expect(placed.status).toBe('waiting');
+      const queue = (await http.get(`${API}/shop/requests`).set(auth(admin)).expect(200)).body.requests;
+      const row = queue.find((r: any) => r.id === placed.id);
+      expect(row.phone).toBe(`+91 ${number.slice(2, 7)} ${number.slice(7)}`);
+      expect(row.items).toEqual([expect.objectContaining({ productId: product.id, qty: pack })]);
+      expect((await http.get(`${API}/cart`).set(auth(customer)).expect(200)).body.cart.items).toHaveLength(0);
+      expect((await http.get(`${API}/shop/requests/${placed.id}/status?token=${placed.token}`).expect(200)).body.status).toBe('waiting');
+      await http.post(`${API}/shop/app-requests`).set(auth(customer)).send({ lat: hub.hubLat, lng: hub.hubLng }).expect(400); // cart empty
+
+      // Radius is an admin setting.
+      expect((await http.patch(`${API}/settings`).set(auth(admin)).send({ shopRadiusM: 2000 }).expect(200)).body.settings.shopRadiusM).toBe(2000);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ shopRadiusM: 5 }).expect(400);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ shopRadiusM: 100 }).expect(200);
+      await http.post(`${API}/shop/requests/${placed.id}/reject`).set(auth(admin)).expect(200);
+    });
+
     it('the QR page lists products, takes a walk-in order and shows when it is billed', async () => {
       const catalog = (await http.get(`${API}/shop/catalog`).expect(200)).body.products;
       expect(catalog.length).toBeGreaterThan(0);

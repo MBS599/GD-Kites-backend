@@ -18,7 +18,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Prisma, type Product } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsIn, IsInt, IsLatitude, IsLongitude, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { randomBytes } from 'node:crypto';
 import type { Response } from 'express';
 import { toBuffer } from 'qrcode';
@@ -26,9 +26,10 @@ import { CurrentUser, Public, Roles, type AuthUser } from '../../common/auth.dec
 import { lineTotal, unitPrice } from '../../common/pricing';
 import { comboContents, comboCost, isAvailable, orderInclude, orderOut, productDisplayName, productInclude, type FullOrder } from '../../common/serializers';
 import { AppConfig } from '../../config/app-config.service';
+import { haversineKm } from '../../domain/geo';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
-import { PushService } from '../sms/push.service';
+import { PushService, shopBillPush, shopRejectedPush, shopRequestPush } from '../sms/push.service';
 import { normalizeIndianMobile, SmsService } from '../sms/sms.service';
 import { BillService } from './bills';
 import { renderQrPoster } from './qr-poster';
@@ -43,6 +44,12 @@ export class ShopRequestDto {
   /** The customer's WhatsApp number (Indian mobile); the bill is sent there. */
   @IsString() @MaxLength(20) phone: string;
   @ValidateNested({ each: true }) @Type(() => ShopLineDto) @ArrayMinSize(1) @ArrayMaxSize(60) items: ShopLineDto[];
+}
+
+/** "Buy at the shop" in the app: where the phone is now (must be inside the shop). */
+export class ShopAppRequestDto {
+  @IsLatitude() lat: number;
+  @IsLongitude() lng: number;
 }
 
 export class ShopBillDto extends ShopRequestDto {
@@ -152,27 +159,59 @@ export class ShopService {
   async createRequest(dto: ShopRequestDto) {
     const phone = this.phone(dto.phone);
     // Checked now so the customer hears about out-of-stock items before walking to the counter.
-    await this.prisma.tx((tx) => this.price(tx, dto.items));
+    const { subtotal } = await this.prisma.tx((tx) => this.price(tx, dto.items));
+    return this.openRequest(dto.name, phone, dto.items, subtotal);
+  }
+
+  /** Waiting at the counter for the owner to bill (QR page and "Buy at the shop" in the app). */
+  private async openRequest(rawName: string, phone: string, items: Line[], subtotal: Prisma.Decimal | number) {
     const waiting = await this.prisma.shopRequest.count({ where: { phone, status: 'WAITING' } });
     if (waiting >= 3) throw new BadRequestException('You already have orders waiting at the counter. Please ask the shop to bill them first.');
     const r = await this.prisma.shopRequest.create({
       data: {
-        name: dto.name.trim().replace(/\s+/g, ' '),
+        name: rawName.trim().replace(/\s+/g, ' '),
         phone,
-        items: dto.items.map((i) => ({ productId: i.productId, qty: i.qty })),
+        items: items.map((i) => ({ productId: i.productId, qty: i.qty })),
         token: randomBytes(18).toString('base64url'),
       },
     });
     // Shop staff: a ping on their phones; the counter screen also refreshes by itself.
     const admins = await this.prisma.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: { id: true } });
     for (const a of admins) {
-      this.push.notifyUser(a.id, {
-        title: 'New counter order',
-        body: `${r.name} placed an order from the shop QR.`,
-        data: { type: 'shopRequest', requestId: r.id },
-      });
+      this.push.notifyUser(a.id, shopRequestPush(r.id, r.name, new Set(items.map((i) => i.productId)).size, subtotal));
     }
     return { id: r.id, token: r.token, status: 'waiting' };
+  }
+
+  // ------------------------------------------------------------ customer (app)
+
+  /**
+   * "Buy at the shop" at checkout: the customer is standing in the shop (their phone's location
+   * within the shop radius of the hub). Their cart goes to the counter like a QR order, with the
+   * name and number of their account; the shop bills it and they pay in cash there.
+   */
+  async createAppRequest(user: AuthUser, dto: ShopAppRequestDto) {
+    const u = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    const phone = u.phoneVerified ?? normalizeIndianMobile(u.phone ?? '');
+    if (!phone) throw new BadRequestException('Add your mobile number in Profile first: the shop sends the bill there on WhatsApp.');
+    const [hub, settings] = await Promise.all([
+      this.prisma.serviceArea.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' } }),
+      this.prisma.appSettings.findUnique({ where: { id: 1 }, select: { shopRadiusM: true } }),
+    ]);
+    const radius = settings?.shopRadiusM ?? 100;
+    if (!hub) throw new BadRequestException('Buying at the shop is not available right now.');
+    const away = Math.round(haversineKm(hub.hubLat, hub.hubLng, dto.lat, dto.lng) * 1000);
+    if (away > radius) {
+      const far = away >= 1000 ? `${(away / 1000).toFixed(1)} km` : `${away} m`;
+      throw new BadRequestException(`"Buy at the shop" works only inside GD Kite Center (within ${radius} m). You are about ${far} away: choose Home delivery instead.`);
+    }
+    const cart = await this.prisma.cart.findUnique({ where: { userId: u.id }, include: { items: true } });
+    const items = (cart?.items ?? []).map((i) => ({ productId: i.productId, qty: i.qty }));
+    if (!items.length) throw new BadRequestException('Your cart is empty.');
+    const { subtotal } = await this.prisma.tx((tx) => this.price(tx, items));
+    const r = await this.openRequest(u.businessName ?? u.name, phone, items, subtotal);
+    await this.prisma.cartItem.deleteMany({ where: { cartId: cart!.id } });
+    return { ...r, name: (u.businessName ?? u.name).trim(), total: Number(subtotal) };
   }
 
   async requestStatus(id: string, token: string) {
@@ -227,6 +266,10 @@ export class ShopService {
   async reject(id: string) {
     const r = await this.prisma.shopRequest.updateMany({ where: { id, status: 'WAITING' }, data: { status: 'REJECTED' } });
     if (r.count === 0) throw new NotFoundException('This order is no longer waiting.');
+    // The customer sees it on the QR page; if they also have the app, tell them there too.
+    const req = await this.prisma.shopRequest.findUnique({ where: { id }, select: { phone: true } });
+    const customer = req ? await this.findCustomer(req.phone) : null;
+    if (customer) this.push.notifyUser(customer.id, shopRejectedPush());
     return { ok: true };
   }
 
@@ -309,6 +352,8 @@ export class ShopService {
     const full = (await this.prisma.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude })) as FullOrder;
     this.realtime.orderUpdated(full);
     this.bills.sendAfterDelivery(orderId);
+    // Customers with the app: a thank-you that opens this purchase (bill inside).
+    this.push.notifyUser(full.customerId, shopBillPush(full.id, full.number, full.total));
     return { order: orderOut(full) };
   }
 
@@ -348,6 +393,15 @@ export class ShopController {
   @Post('requests')
   createRequest(@Body() dto: ShopRequestDto) {
     return this.shop.createRequest(dto);
+  }
+
+  /** Customer app, standing in the shop: send the cart to the counter. */
+  @ApiBearerAuth()
+  @Roles('CUSTOMER')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('app-requests')
+  createAppRequest(@CurrentUser() user: AuthUser, @Body() dto: ShopAppRequestDto) {
+    return this.shop.createAppRequest(user, dto);
   }
 
   /** Public (QR page): the saved name for a number, and whether it is on WhatsApp. */
