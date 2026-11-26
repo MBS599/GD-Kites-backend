@@ -110,6 +110,8 @@ export class AuthController {
       supportPhone: linked ? await this.settings.contactNumber() : null,
       /** Smallest cart value (goods, before delivery) in rupees; 0 = no minimum. */
       minOrderValue: await this.settings.minOrderValue(),
+      /** "Rate us on Google" link; null = not set. */
+      googleReviewUrl: await this.settings.googleReviewUrl(),
     };
   }
 

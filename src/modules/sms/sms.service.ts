@@ -14,7 +14,7 @@ import {
 import { WhatsAppWebSession } from './whatsapp-web.session';
 import { clipVars, maskSecret, renderSms, SMS_EVENTS, type SmsEvent } from './sms.templates';
 import { renderWhatsApp } from './whatsapp.templates';
-import { pushFor, PushService } from './push.service';
+import { pushFor, PushService, reviewPush } from './push.service';
 
 interface Job {
   event: SmsEvent;
@@ -267,6 +267,31 @@ export class SmsService {
       results.push(n ? await this.process(job, { dedupe: false }) : await this.record(job, 'SKIPPED', 'Invalid Indian mobile number'));
     }
     return results;
+  }
+
+  /**
+   * Once per customer, after their first delivered order or shop bill (called after the bill):
+   * a push and a WhatsApp message asking for a Google review. Off while no review link is set;
+   * the WhatsApp part respects "messages off". Marked first, so it is never sent twice.
+   */
+  async askForReview(customerId: string, contactPhone?: string | null) {
+    const s = await this.prisma.appSettings.findUnique({ where: { id: 1 }, select: { googleReviewUrl: true } });
+    const url = s?.googleReviewUrl?.trim();
+    if (!url) return;
+    const marked = await this.prisma.user.updateMany({
+      where: { id: customerId, role: 'CUSTOMER', isActive: true, reviewAskedAt: null },
+      data: { reviewAskedAt: new Date() },
+    });
+    if (marked.count === 0) return;
+    const customer = await this.prisma.user.findUniqueOrThrow({ where: { id: customerId } });
+    this.pushService.notifyUser(customer.id, reviewPush(url));
+    if (!customer.smsEnabled) return;
+    this.enqueue({
+      event: 'reviewRequest',
+      to: contactPhone || customer.phone || '',
+      vars: [firstName(customer.name), url],
+      userId: customer.id,
+    });
   }
 
   /** Admin test from Settings; bypasses dedupe and opt-out, waits for the result. */

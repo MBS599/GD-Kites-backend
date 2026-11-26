@@ -16,7 +16,7 @@ import type { SmsEvent } from './sms.templates';
  */
 export interface WaTemplate {
   name: string;
-  category: 'UTILITY' | 'AUTHENTICATION';
+  category: 'UTILITY' | 'MARKETING' | 'AUTHENTICATION';
   /** Body text (unused for AUTHENTICATION: Meta supplies the fixed OTP wording). */
   body: string;
   examples: string[];
@@ -197,6 +197,16 @@ export const WA_TEMPLATES: Record<SmsEvent, WaTemplate> = {
     ],
     params: same,
   },
+  reviewRequest: {
+    name: 'gdk_review_request_v1',
+    category: 'MARKETING',
+    body:
+      'Hi {{1}},\n\nThank you for shopping with GD Kite Center! If you liked our kites and service, please rate us on ' +
+      'Google. It takes a few seconds:\n{{2}}\n\nYour review helps other shops find us.' +
+      SIGN,
+    examples: ['Mayur', 'https://share.google/3B2SduHzPbttRgvyn'],
+    params: same,
+  },
   test: {
     name: 'gdk_test',
     category: 'UTILITY',
@@ -237,7 +247,7 @@ export function templateCreatePayload(t: WaTemplate, language: string) {
   return {
     name: t.name,
     language,
-    category: 'UTILITY',
+    category: t.category,
     components: [
       t.examples.length
         ? { type: 'BODY', text: t.body, example: { body_text: [t.examples] } }

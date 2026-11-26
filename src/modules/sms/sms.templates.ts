@@ -128,6 +128,13 @@ export const SMS_TEMPLATES = {
     long: [2, 7, 9, 12, 13],
   },
 
+  /** Once per customer, after their first delivery or shop bill. [first name, review link] */
+  reviewRequest: {
+    audience: 'customer',
+    text: 'Hi {#var#}, thank you for shopping with GD Kite Center! If you liked our kites and service, please rate us on Google, it takes a few seconds: {#var#}',
+    long: [1],
+  },
+
   /** Admin "send test message" from Settings. */
   test: {
     audience: 'admin',

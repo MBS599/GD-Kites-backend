@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Get, Injectable, Patch } from '@
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { readFile } from 'node:fs/promises';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, IsUrl, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { Public } from '../../common/auth.decorators';
 import { AppConfig } from '../../config/app-config.service';
 import { Roles } from '../../common/auth.decorators';
@@ -39,6 +39,12 @@ export class SettingsService {
   async minOrderValue(): Promise<number> {
     const s = await this.prisma.appSettings.findUnique({ where: { id: 1 }, select: { minOrderValue: true } });
     return s ? s.minOrderValue.toNumber() : 1000;
+  }
+
+  /** "Rate us on Google" link, or null when not set. */
+  async googleReviewUrl(): Promise<string | null> {
+    const s = await this.prisma.appSettings.findUnique({ where: { id: 1 }, select: { googleReviewUrl: true } });
+    return s?.googleReviewUrl ?? null;
   }
 
   /** The WhatsApp-linked business number as +91…, or null when no phone is linked. */
@@ -89,6 +95,13 @@ export class UpdateSettingsDto {
   @IsOptional() @IsInt() @Min(0) @Max(23) dailySummaryHour?: number;
   /** "Buy at the shop" in the app: allowed within this many metres of the shop. Default 100. */
   @IsOptional() @IsInt() @Min(20) @Max(5000) shopRadiusM?: number;
+  /** Google review link (Business Profile "Ask for reviews" or share link). Empty turns reviews off. */
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() || null : value))
+  @ValidateIf((_, v) => v !== null)
+  @IsUrl({ protocols: ['https'], require_protocol: true }, { message: 'Paste the full Google link, starting with https://' })
+  @MaxLength(300)
+  googleReviewUrl?: string | null;
 }
 
 const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
@@ -107,6 +120,7 @@ const out = (s: AppSettings & { deliveryVehicleType: VehicleType | null }) => ({
   dailySummaryTo: summaryNumbers(s.dailySummaryTo).map((n) => n.slice(2)),
   dailySummaryHour: s.dailySummaryHour,
   shopRadiusM: s.shopRadiusM,
+  googleReviewUrl: s.googleReviewUrl,
   courierEnabled: s.courierEnabled,
   courierPackingCharge: s.courierPackingCharge.toNumber(),
 });

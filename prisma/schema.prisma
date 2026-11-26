@@ -78,6 +78,9 @@ model User {
   isActive            Boolean         @default(true)
   /// Transactional SMS updates (order status, assignments). User can turn off.
   smsEnabled          Boolean         @default(true)
+  /// When we asked this customer to review GD Kite Center on Google (asked once, after
+  /// their first delivered order or shop bill); null = not asked yet.
+  reviewAskedAt       DateTime?
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
   driverProfile       DriverProfile?
@@ -149,6 +152,9 @@ model AppSettings {
   dailySummarySentOn    String?
   /// "Buy at the shop" in the customer app: allowed within this many metres of the shop (the hub).
   shopRadiusM           Int          @default(100)
+  /// Google review link (Google Business Profile). Set = customers are asked once, after their
+  /// first delivery or shop bill, and see "Rate us on Google" in the app; null = off.
+  googleReviewUrl       String?
   updatedAt             DateTime     @updatedAt
 }
 

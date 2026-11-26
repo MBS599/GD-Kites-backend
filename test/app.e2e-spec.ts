@@ -264,6 +264,7 @@ describe('GD Kite Center API (e2e)', () => {
     it.each([
       ['get', '/admin/dashboard'],
       ['get', '/reports/sales'],
+      ['get', '/reports/demand'],
       ['get', '/drivers'],
       ['post', '/sizes'],
       ['post', '/products'],
@@ -1578,6 +1579,15 @@ describe('GD Kite Center API (e2e)', () => {
       expect(top[0].qty).toBeGreaterThan(0);
       const drivers = (await http.get(`${API}/reports/drivers`).set(auth(admin)).expect(200)).body.drivers;
       expect(drivers.find((x: any) => x.name === 'Rahul Patil').deliveries).toBeGreaterThanOrEqual(1);
+
+      // Area-wise demand: app orders by delivery area, with a map point; counter sales only with source=all.
+      const demand = (await http.get(`${API}/reports/demand`).set(auth(admin)).expect(200)).body;
+      expect(demand.areas.length).toBeGreaterThan(0);
+      expect(demand.areas[0]).toMatchObject({ shopCounter: false, area: expect.any(String), lat: expect.any(Number), lng: expect.any(Number) });
+      expect(demand.areas[0].sales).toBeGreaterThanOrEqual(demand.areas[demand.areas.length - 1].sales);
+      expect(demand.totals.sales).toBeCloseTo(demand.areas.reduce((t: number, a: any) => t + a.sales, 0), 2);
+      expect(demand.areas.some((a: any) => a.shopCounter)).toBe(false);
+      await http.get(`${API}/reports/demand?source=shop`).set(auth(admin)).expect(400);
     });
   });
 
@@ -2028,6 +2038,39 @@ describe('GD Kite Center API (e2e)', () => {
   });
 
   describe('shop counter', () => {
+    it('asks a customer once for a Google review after their first bill, only while a link is set', async () => {
+      const catalog = (await http.get(`${API}/shop/catalog`).expect(200)).body.products;
+      const bill = (phone: string) =>
+        http.post(`${API}/shop/bills`).set(auth(admin)).send({ name: 'Review Test', phone, items: [{ productId: catalog[0].id, qty: 1 }] }).expect(201);
+      const asked = async (phone: string) => {
+        await new Promise((r) => setTimeout(r, 400));
+        await app.get(SmsService).drain();
+        return prisma.smsMessage.findMany({ where: { event: 'reviewRequest', to: phone } });
+      };
+
+      // No link: nobody is asked.
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ googleReviewUrl: '' }).expect(200);
+      await bill('9876509001');
+      expect(await asked('919876509001')).toHaveLength(0);
+
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ googleReviewUrl: 'http://example.com' }).expect(400);
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ googleReviewUrl: 'not a link' }).expect(400);
+      const link = 'https://share.google/3B2SduHzPbttRgvyn';
+      expect((await http.patch(`${API}/settings`).set(auth(admin)).send({ googleReviewUrl: link }).expect(200)).body.settings.googleReviewUrl).toBe(link);
+      expect((await http.get(`${API}/auth/config`).expect(200)).body.googleReviewUrl).toBe(link);
+
+      // A new customer's first bill: asked once, with the link; the next bill: not again.
+      await bill('9876509002');
+      const first = await asked('919876509002');
+      expect(first).toHaveLength(1);
+      expect(first[0].body).toContain(link);
+      await bill('9876509002');
+      expect(await asked('919876509002')).toHaveLength(1);
+
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ googleReviewUrl: null }).expect(200);
+      expect((await http.get(`${API}/auth/config`).expect(200)).body.googleReviewUrl).toBeNull();
+    });
+
     it('"Buy at the shop" in the app: only inside the shop, the cart goes to the counter', async () => {
       const hub = await prisma.serviceArea.findFirstOrThrow({ where: { isActive: true }, orderBy: { createdAt: 'asc' } });
       const product = await prisma.product.findFirstOrThrow({ where: { isActive: true, inStock: true, isCombo: false, isDamaged: false } });

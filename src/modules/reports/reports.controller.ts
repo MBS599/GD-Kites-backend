@@ -1,7 +1,7 @@
 import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDate, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsDate, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { Roles } from '../../common/auth.decorators';
 import { startOfToday } from '../../common/time';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -12,6 +12,11 @@ export class RangeQuery {
   /** ISO date/time (exclusive); defaults to now. */
   @IsOptional() @Type(() => Date) @IsDate() to?: Date;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit?: number;
+}
+
+export class DemandQuery extends RangeQuery {
+  /** online = app orders only (default); all = app orders + one "Shop counter" row. */
+  @IsOptional() @IsIn(['online', 'all']) source?: 'online' | 'all';
 }
 
 const range = (q: RangeQuery) => {
@@ -61,6 +66,65 @@ export class ReportsController {
         cancelled: days.reduce((s, d) => s + d.cancelled, 0),
       },
       days,
+    };
+  }
+
+  /**
+   * Area-wise demand: non-cancelled orders placed in the range, grouped by the delivery area
+   * (area + city), with the average location for the map. Counter sales (no delivery address)
+   * are one "Shop counter" row when source = all.
+   */
+  @Get('demand')
+  async demand(@Query() q: DemandQuery) {
+    const { from, to } = range(q);
+    const withShop = q.source === 'all';
+    const rows = await this.prisma.$queryRaw<
+      {
+        area: string;
+        city: string;
+        counter: boolean;
+        lat: number;
+        lng: number;
+        orders: bigint;
+        customers: bigint;
+        sales: string;
+        last: Date;
+        pincodes: string[];
+      }[]
+    >`
+      SELECT CASE WHEN "deliveryMode" = 'COUNTER' THEN 'Shop counter' ELSE initcap(trim("addrArea")) END AS area,
+             CASE WHEN "deliveryMode" = 'COUNTER' THEN '' ELSE initcap(trim("addrCity")) END AS city,
+             ("deliveryMode" = 'COUNTER') AS counter,
+             AVG("addrLat")::float8 AS lat, AVG("addrLng")::float8 AS lng,
+             COUNT(*)::bigint AS orders, COUNT(DISTINCT "customerId")::bigint AS customers,
+             SUM(total)::text AS sales, MAX("placedAt") AS last,
+             array_remove(array_agg(DISTINCT "addrPincode"), NULL) AS pincodes
+      FROM "Order"
+      WHERE status <> 'CANCELLED' AND "placedAt" >= ${from} AND "placedAt" < ${to}
+        AND (${withShop} OR "deliveryMode" <> 'COUNTER')
+      GROUP BY 1, 2, 3
+      ORDER BY SUM(total) DESC`;
+    const areas = rows.map((r) => ({
+      area: r.area || 'Unknown area',
+      city: r.city,
+      shopCounter: r.counter,
+      lat: r.lat,
+      lng: r.lng,
+      orders: Number(r.orders),
+      customers: Number(r.customers),
+      sales: Number(r.sales),
+      lastOrderAt: r.last.toISOString(),
+      pincodes: r.counter ? [] : r.pincodes.filter((p) => p).sort(),
+    }));
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      totals: {
+        areas: areas.filter((a) => !a.shopCounter).length,
+        orders: areas.reduce((s, a) => s + a.orders, 0),
+        sales: areas.reduce((s, a) => s + a.sales, 0),
+      },
+      areas,
     };
   }
 

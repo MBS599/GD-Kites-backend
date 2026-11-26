@@ -68,6 +68,8 @@ export class BillService {
     void (async () => {
       const o = this.delivered(await this.load(orderId));
       await this.sms.orderBill(o, await this.pdf(o));
+      // First delivery or shop bill of this customer: ask for a Google review (once).
+      await this.sms.askForReview(o.customerId, o.contactPhone);
     })().catch((e) => this.logger.warn(`Bill for ${orderId} not sent: ${String(e)}`));
   }
 

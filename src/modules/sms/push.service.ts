@@ -33,6 +33,15 @@ const PUSH: Partial<Record<SmsEvent, (v: string[]) => Omit<PushMessage, 'data'>>
 
 const rupees = (v: { toString(): string } | number) => `₹${Math.round(Number(v.toString())).toLocaleString('en-IN')}`;
 
+/** Customer: once, after their first delivery or shop bill. Tap opens the Google review page. */
+export function reviewPush(url: string): PushMessage {
+  return {
+    title: 'How did we do?',
+    body: 'Liked our kites and service? Rate GD Kite Center on Google. It takes a few seconds.',
+    data: { type: 'review', url },
+  };
+}
+
 /** Shop staff: a walk-in customer sent an order from the counter QR. */
 export function shopRequestPush(requestId: string, name: string, lines: number, total: { toString(): string } | number): PushMessage {
   return {
