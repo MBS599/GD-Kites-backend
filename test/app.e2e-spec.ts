@@ -1570,6 +1570,10 @@ describe('GD Kite Center API (e2e)', () => {
       expect(month.trend[30].key).toBe(day(0));
       expect(month.trend.reduce((t: number, b: any) => t + b.sales, 0)).toBeCloseTo(month.sales, 2);
       expect(month.topProducts.length).toBeGreaterThan(0);
+      // Best customers: by sales, highest first, with a name and order count.
+      expect(month.topCustomers.length).toBeGreaterThan(0);
+      expect(month.topCustomers[0]).toMatchObject({ id: expect.any(String), name: expect.any(String), orders: expect.any(Number) });
+      expect(month.topCustomers[0].sales).toBeGreaterThanOrEqual(month.topCustomers[month.topCustomers.length - 1].sales);
       expect(month.customers).toBeGreaterThan(0);
       await http.get(`${API}/admin/dashboard`).set(auth(admin)).query({ from: day(0), to: day(5) }).expect(400);
       await http.get(`${API}/admin/dashboard`).set(auth(admin)).query({ from: '04-10-2026' }).expect(400);

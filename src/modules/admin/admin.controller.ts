@@ -100,7 +100,7 @@ export class AdminController {
     const days = Math.round((end.getTime() - start.getTime()) / DAY_MS);
     const unit: TrendUnit = days <= 1 ? 'hour' : days <= 62 ? 'day' : 'month';
     const fmt = unit === 'hour' ? 'YYYY-MM-DD"T"HH24' : unit === 'day' ? 'YYYY-MM-DD' : 'YYYY-MM';
-    const [buckets, top, customers] = await Promise.all([
+    const [buckets, top, customers, bestCustomers] = await Promise.all([
       this.prisma.$queryRaw<{ k: string; sales: string; orders: number }[]>`
         SELECT to_char(date_trunc(${unit}, o."placedAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata'), ${fmt}) AS k,
                SUM(o.total)::text AS sales, COUNT(*)::int AS orders
@@ -113,6 +113,13 @@ export class AdminController {
         WHERE o.status <> 'CANCELLED' AND o."placedAt" >= ${start} AND o."placedAt" < ${end}
         GROUP BY i."productName" ORDER BY SUM(i."lineTotal") DESC LIMIT 5`,
       this.prisma.order.findMany({ where: { ...live, placedAt: inPeriod }, distinct: ['customerId'], select: { customerId: true } }),
+      // Best customers: who bought the most (app orders and shop bills) in the period.
+      this.prisma.$queryRaw<{ id: string; name: string; orders: number; sales: string }[]>`
+        SELECT u.id, COALESCE(NULLIF(trim(u."businessName"), ''), u.name) AS name,
+               COUNT(*)::int AS orders, SUM(o.total)::text AS sales
+        FROM "Order" o JOIN "User" u ON u.id = o."customerId"
+        WHERE o.status <> 'CANCELLED' AND o."placedAt" >= ${start} AND o."placedAt" < ${end}
+        GROUP BY u.id ORDER BY SUM(o.total) DESC LIMIT 5`,
     ]);
     // Online vs shop counter, cash collected, new customers, QR orders waiting.
     const [source, cash, qrWaiting, newCustomers] = await Promise.all([
@@ -180,6 +187,8 @@ export class AdminController {
         qrWaiting,
         /** Best sellers in the period by revenue. */
         topProducts: top.map((t) => ({ name: t.name, qty: t.qty, revenue: Number(t.revenue) })),
+        /** Best customers in the period by sales (app orders and shop bills). */
+        topCustomers: bestCustomers.map((c) => ({ id: c.id, name: c.name, orders: c.orders, sales: Number(c.sales) })),
       },
     };
   }
