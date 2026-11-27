@@ -116,10 +116,12 @@ export class WhatsAppWebController {
       qr: this.web.currentQr(),
       number: this.web.state === 'ready' ? this.web.number : null,
       error: this.web.lastError,
+      /** Seconds since WhatsApp Web started (while starting / showing a QR), for "taking long". */
+      startingFor: this.web.state === 'starting' && this.web.startedAt ? Math.round((Date.now() - this.web.startedAt) / 1000) : null,
     };
   }
 
-  /** Unlink the current phone; a new QR code appears. */
+  /** Unlink the current phone (or clear a stuck login); a new QR code appears. */
   @Post('logout')
   @HttpCode(204)
   async logout() {

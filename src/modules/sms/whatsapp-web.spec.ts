@@ -35,22 +35,91 @@ const config = (over: Record<string, unknown> = {}) =>
 const fakePrisma = () => ({
   smsMessage: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   appSettings: { upsert: jest.fn().mockResolvedValue({}) },
+  user: { findMany: jest.fn().mockResolvedValue([{ id: 'admin-1' }]) },
 });
 
 function session(prisma: any = fakePrisma()) {
-  const fake = new FakeClient();
+  let fake = new FakeClient();
+  const push = { notifyUser: jest.fn() };
+  const cleared = { count: 0 };
   const s = new (class extends WhatsAppWebSession {
     protected async createClient() {
       return fake;
     }
-  })(config(), prisma);
-  return { s, fake, prisma };
+    protected async clearSavedLogin() {
+      cleared.count++;
+    }
+  })(config(), prisma, push as any);
+  const nextClient = () => (fake = new FakeClient());
+  return { s, get fake() { return fake; }, prisma, push, cleared, nextClient };
 }
 
 // Drawing the QR images is slow when the whole suite runs in parallel on a busy machine.
 jest.setTimeout(30_000);
 
 describe('WhatsApp Web (linked phone)', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('logged out on the phone: starts over without the saved login (new QR) and tells the admins', async () => {
+    jest.useFakeTimers();
+    const { s, fake, push, cleared } = session();
+    await s.start();
+    fake.emit('ready');
+    expect(s.state).toBe('ready');
+    const fresh = jest.spyOn(s, 'freshLink').mockResolvedValue();
+    fake.emit('disconnected', 'LOGOUT');
+    expect(s.state).toBe('disconnected');
+    await jest.advanceTimersByTimeAsync(15_000);
+    expect(fresh).toHaveBeenCalledTimes(1);
+    fresh.mockRestore();
+    // Still not linked 2 minutes later: one push to each admin, not repeated.
+    await jest.advanceTimersByTimeAsync(2 * 60_000);
+    expect(push.notifyUser).toHaveBeenCalledTimes(1);
+    expect(push.notifyUser.mock.calls[0][1]).toMatchObject({ title: 'WhatsApp is not connected', data: { type: 'whatsappDown' } });
+    fake.emit('disconnected', 'NAVIGATION');
+    await jest.advanceTimersByTimeAsync(3 * 60_000);
+    expect(push.notifyUser).toHaveBeenCalledTimes(1);
+    await s.onModuleDestroy();
+  });
+
+  it('a network blip that reconnects quickly does not alert anyone', async () => {
+    jest.useFakeTimers();
+    const { s, fake, push } = session();
+    await s.start();
+    fake.emit('ready');
+    jest.spyOn(s, 'restart').mockResolvedValue();
+    fake.emit('disconnected', 'NAVIGATION');
+    await jest.advanceTimersByTimeAsync(20_000);
+    fake.emit('ready');
+    await jest.advanceTimersByTimeAsync(3 * 60_000);
+    expect(push.notifyUser).not.toHaveBeenCalled();
+    await s.onModuleDestroy();
+  });
+
+  it('"Get a new QR code" removes the saved login and starts again', async () => {
+    const { s, cleared } = session();
+    await s.start();
+    await s.logout();
+    expect(cleared.count).toBe(1);
+    expect(s.state).toBe('starting');
+    await s.onModuleDestroy();
+  });
+
+  it('no QR code and no login after 90 s: starts over without the saved login once, then shows failed', async () => {
+    jest.useFakeTimers();
+    const { s, cleared } = session();
+    await s.start();
+    expect(s.state).toBe('starting');
+    await jest.advanceTimersByTimeAsync(90_000);
+    expect(cleared.count).toBe(1);
+    expect(s.state).toBe('starting');
+    await jest.advanceTimersByTimeAsync(90_000);
+    expect(cleared.count).toBe(1);
+    expect(s.state).toBe('failed');
+    expect(s.lastError).toContain('Get a new QR code');
+    await s.onModuleDestroy();
+  });
+
   it('a frozen browser fails the send quickly and restarts WhatsApp Web', async () => {
     const { s, fake } = session();
     await s.start();
@@ -192,7 +261,7 @@ describe('WhatsApp Web (linked phone)', () => {
   });
 
   it('stays off unless MESSAGING_PROVIDER is wwebjs', () => {
-    const s = new WhatsAppWebSession(config({ MESSAGING_PROVIDER: 'log' }), {} as any);
+    const s = new WhatsAppWebSession(config({ MESSAGING_PROVIDER: 'log' }), {} as any, {} as any);
     expect(s.enabled).toBe(false);
     s.onModuleInit();
     expect(s.state).toBe('off');

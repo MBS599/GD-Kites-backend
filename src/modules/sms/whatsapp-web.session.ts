@@ -4,9 +4,14 @@ import { join, resolve } from 'node:path';
 import { toDataURL } from 'qrcode';
 import { AppConfig } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PushService } from './push.service';
 
 /** Older than this, a QR code can no longer be scanned. */
 const QR_STALE_MS = 45_000;
+/** Starting without a QR code or a login after this long: WhatsApp Web is stuck. */
+const START_STUCK_MS = 90_000;
+/** Still not connected this long after a disconnect: tell the admins. */
+const ALERT_AFTER_MS = 2 * 60_000;
 
 export type WebSessionState = 'off' | 'starting' | 'qr' | 'ready' | 'disconnected' | 'failed';
 
@@ -53,10 +58,19 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
   private lastSendAt = 0;
   private sendChain: Promise<unknown> = Promise.resolve();
   private restartTimer?: NodeJS.Timeout;
+  private stuckTimer?: NodeJS.Timeout;
+  private alertTimer?: NodeJS.Timeout;
+  /** Admins were told WhatsApp is down (reset once it is connected again). */
+  private alerted = false;
+  /** Already started over once without the saved login after a stuck start (no loop). */
+  private triedFresh = false;
+  /** When the current start began (for "taking longer than usual" in Settings). */
+  startedAt: number | null = null;
 
   constructor(
     private readonly config: AppConfig,
     private readonly prisma: PrismaService,
+    private readonly push: PushService,
   ) {}
 
   get enabled() {
@@ -75,6 +89,8 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy() {
     clearTimeout(this.restartTimer);
+    clearTimeout(this.stuckTimer);
+    clearTimeout(this.alertTimer);
     clearInterval(this.readyPoll);
     await this.client?.destroy().catch(() => undefined);
   }
@@ -94,10 +110,14 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
     if (this.state === 'starting' || this.state === 'ready' || this.state === 'qr') return;
     this.state = 'starting';
     this.qr = null;
+    this.startedAt = Date.now();
+    clearTimeout(this.stuckTimer);
+    this.stuckTimer = setTimeout(() => this.startStuck(), START_STUCK_MS);
     try {
       const client = await this.createClient();
       this.client = client;
       client.on('qr', async (qr: string) => {
+        clearTimeout(this.stuckTimer);
         this.state = 'qr';
         this.qrAt = Date.now();
         this.qr = await toDataURL(qr, { margin: 1, width: 320 });
@@ -105,6 +125,7 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
       });
       client.on('ready', () => this.markReady('ready event'));
       client.on('authenticated', () => {
+        clearTimeout(this.stuckTimer);
         this.logger.log('WhatsApp session authenticated, loading chats…');
         this.watchForConnected(client);
       });
@@ -115,26 +136,81 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
       client.on('auth_failure', (msg: string) => {
         this.state = 'failed';
         this.lastError = `Authentication failed: ${msg}`;
-        void this.saveNumber(null);
+        this.logger.warn(this.lastError);
+        // The saved login is no good: start over with a new QR code.
+        this.alertLater('the saved WhatsApp login stopped working');
+        this.restartTimer = setTimeout(() => void this.freshLink(), 5_000);
       });
       client.on('disconnected', (reason: string) => {
         this.state = 'disconnected';
         this.lastError = `Disconnected: ${reason}`;
         this.logger.warn(this.lastError);
-        // Unlinked from the phone (Linked devices → Log out): stop showing the number.
-        // Other reasons are network blips; the saved login reconnects with the same number.
-        if (reason === 'LOGOUT') void this.saveNumber(null);
-        // Try again shortly (a new QR appears if the phone unlinked the device).
-        this.restartTimer = setTimeout(() => void this.restart(), 15_000);
+        this.alertLater(reason === 'LOGOUT' ? 'WhatsApp was logged out on the phone' : `WhatsApp disconnected (${reason})`);
+        // Unlinked from the phone (Linked devices → Log out): the saved login is dead, so start
+        // over without it, or WhatsApp Web loads it forever and never shows a new QR code.
+        // Other reasons are network blips: the saved login reconnects with the same number.
+        if (reason === 'LOGOUT') void this.saveNumber(null); // stop showing the number now
+        clearTimeout(this.restartTimer);
+        this.restartTimer = setTimeout(() => void (reason === 'LOGOUT' ? this.freshLink() : this.restart()), 15_000);
       });
       client.on('message_ack', (msg: { id: { _serialized: string } }, ack: number) => {
         void this.applyAck(msg.id._serialized, ack);
       });
       await client.initialize();
     } catch (e) {
+      clearTimeout(this.stuckTimer);
       this.state = 'failed';
       this.lastError = String(e instanceof Error ? e.message : e);
       this.logger.error(`WhatsApp Web could not start: ${this.lastError}`);
+      this.alertLater('WhatsApp could not start on the server');
+    }
+  }
+
+  /** No QR code and no login after START_STUCK_MS: show it as failed so Settings offers a fix. */
+  private startStuck() {
+    if (this.state !== 'starting') return;
+    // First time: the saved login is most likely dead (phone logged out while the server was
+    // down): drop it and show a new QR code. If that is stuck too, show it as failed.
+    if (!this.triedFresh) {
+      this.triedFresh = true;
+      this.logger.warn('WhatsApp Web stuck without a QR code — starting over without the saved login.');
+      this.alertLater('WhatsApp needs to be linked again');
+      void this.freshLink();
+      return;
+    }
+    this.state = 'failed';
+    this.lastError = 'WhatsApp Web did not start (no QR code). Tap "Get a new QR code".';
+    this.logger.warn(this.lastError);
+    this.alertLater('WhatsApp is not connected');
+  }
+
+  /**
+   * Admins get a push if WhatsApp is still not connected ALERT_AFTER_MS later (a quick network
+   * blip reconnects by itself). Once per outage: reset when it is connected again.
+   */
+  private alertLater(why: string) {
+    if (this.alerted || this.alertTimer) return;
+    this.alertTimer = setTimeout(() => {
+      this.alertTimer = undefined;
+      if (this.state === 'ready' || this.alerted) return;
+      this.alerted = true;
+      void this.alertAdmins(why);
+    }, ALERT_AFTER_MS);
+  }
+
+  private async alertAdmins(why: string) {
+    try {
+      const admins = await this.prisma.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: { id: true } });
+      for (const a of admins) {
+        this.push.notifyUser(a.id, {
+          title: 'WhatsApp is not connected',
+          body: `${why}. Customers are not getting messages or bills. Open Settings → WhatsApp to link the phone again.`,
+          data: { type: 'whatsappDown' },
+        });
+      }
+      this.logger.warn(`Admins told: ${why}`);
+    } catch (e) {
+      this.logger.error(`Could not alert admins: ${String(e)}`);
     }
   }
 
@@ -161,6 +237,11 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
   private markReady(how: string) {
     if (this.state === 'ready') return;
     clearInterval(this.readyPoll);
+    clearTimeout(this.stuckTimer);
+    clearTimeout(this.alertTimer);
+    this.alertTimer = undefined;
+    this.alerted = false;
+    this.triedFresh = false;
     this.state = 'ready';
     this.qr = null;
     this.lastError = null;
@@ -215,11 +296,40 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
     await this.start();
   }
 
-  /** Unlinks the phone; a new QR code appears for linking another one. */
+  /**
+   * Unlinks the phone and starts over without the saved login, so a new QR code appears
+   * (also the fix when WhatsApp is stuck after the phone logged it out).
+   */
   async logout() {
-    await this.client?.logout().catch(() => undefined);
+    const client = this.client;
+    if (client && this.state === 'ready') {
+      await Promise.race([client.logout(), new Promise((r) => setTimeout(r, 10_000))]).catch(() => undefined);
+    }
+    await this.freshLink();
+  }
+
+  /** Start over without the saved login: a new QR code to scan. */
+  async freshLink() {
+    clearTimeout(this.restartTimer);
+    clearInterval(this.readyPoll);
+    await this.client?.destroy().catch(() => undefined);
+    this.client = null;
+    this.state = 'off';
     await this.saveNumber(null);
-    await this.restart();
+    await this.clearSavedLogin();
+    this.logger.log('Saved WhatsApp login removed — a new QR code is coming.');
+    await this.start();
+  }
+
+  /** Overridable in tests. Removes the saved WhatsApp Web login (the browser profile). */
+  protected async clearSavedLogin() {
+    const dataPath = resolve(this.config.get('WWEBJS_SESSION_DIR'));
+    const sessions = await readdir(dataPath, { withFileTypes: true }).catch(() => []);
+    for (const dir of sessions) {
+      if (dir.isDirectory() && dir.name.startsWith('session')) {
+        await rm(join(dataPath, dir.name), { recursive: true, force: true }).catch(() => undefined);
+      }
+    }
   }
 
   /**
