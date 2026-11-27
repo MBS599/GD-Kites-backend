@@ -9,6 +9,11 @@ class FakeClient extends EventEmitter implements WebClient {
   async initialize() {}
   async destroy() {}
   async logout() {}
+  pairingFor: string | null = null;
+  async requestPairingCode(phone: string) {
+    this.pairingFor = phone;
+    return 'ABCD1234';
+  }
   async getState() {
     return 'CONNECTED';
   }
@@ -93,6 +98,23 @@ describe('WhatsApp Web (linked phone)', () => {
     fake.emit('ready');
     await jest.advanceTimersByTimeAsync(3 * 60_000);
     expect(push.notifyUser).not.toHaveBeenCalled();
+    await s.onModuleDestroy();
+  });
+
+  it('links with a code only while waiting to be linked, and keeps that session for 3 minutes', async () => {
+    jest.useFakeTimers();
+    const { s, fake } = session();
+    await s.start();
+    await expect(s.pairingCode('919822011122')).rejects.toThrow('not waiting to be linked');
+    fake.emit('qr', 'qr-payload');
+    for (let i = 0; i < 40 && !s.qr; i++) await jest.advanceTimersByTimeAsync(50);
+    expect(await s.pairingCode('919822011122')).toBe('ABCD1234');
+    expect(fake.pairingFor).toBe('919822011122');
+    // The QR would count as stale after 45 s, but a code is being typed: no restart.
+    const restart = jest.spyOn(s, 'restart').mockResolvedValue();
+    await jest.advanceTimersByTimeAsync(60_000);
+    expect(s.currentQr()).not.toBeNull();
+    expect(restart).not.toHaveBeenCalled();
     await s.onModuleDestroy();
   });
 

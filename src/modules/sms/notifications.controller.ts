@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -18,11 +19,17 @@ import { CurrentUser, Public, Roles, type AuthUser } from '../../common/auth.dec
 import { PushService } from './push.service';
 import { WhatsAppAdminService } from './whatsapp-admin.service';
 import { WhatsAppWebSession } from './whatsapp-web.session';
+import { normalizeIndianMobile } from './sms.service';
 
 export class DeviceDto {
   /** Firebase Cloud Messaging registration token of this app install. */
   @IsString() @MinLength(20) @MaxLength(4096) token: string;
   @IsIn(['android', 'ios', 'web']) platform: 'android' | 'ios' | 'web';
+}
+
+export class PairingCodeDto {
+  /** The business phone's WhatsApp number (10 digits, +91 optional). */
+  @IsString() @MaxLength(20) phone: string;
 }
 
 export class DeviceRemoveDto {
@@ -117,6 +124,8 @@ export class WhatsAppWebController {
       number: this.web.state === 'ready' ? this.web.number : null,
       error: this.web.lastError,
       /** Seconds since WhatsApp Web started (while starting / showing a QR), for "taking long". */
+      /** The phone can also be linked with a code instead of the QR. */
+      pairingCode: this.web.enabled,
       startingFor: this.web.state === 'starting' && this.web.startedAt ? Math.round((Date.now() - this.web.startedAt) / 1000) : null,
     };
   }
@@ -126,6 +135,19 @@ export class WhatsAppWebController {
   @HttpCode(204)
   async logout() {
     if (this.web.enabled) await this.web.logout();
+  }
+
+  /** An 8-character code to link the phone without scanning (WhatsApp → Linked devices → Link with phone number). */
+  @Post('pairing-code')
+  @HttpCode(200)
+  async pairingCode(@Body() dto: PairingCodeDto) {
+    const phone = normalizeIndianMobile(dto.phone);
+    if (!phone) throw new BadRequestException('Enter the 10-digit WhatsApp number of the business phone.');
+    try {
+      return { code: await this.web.pairingCode(phone) };
+    } catch (e) {
+      throw new BadRequestException(e instanceof Error ? e.message : String(e));
+    }
   }
 
   /** Reconnect after a failure. */

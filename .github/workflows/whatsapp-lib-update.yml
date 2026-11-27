@@ -1,0 +1,72 @@
+# Keeps whatsapp-web.js (the WhatsApp linked-phone library) up to date.
+#
+# WhatsApp changes WhatsApp Web without notice and breaks the library; fixes come as new
+# whatsapp-web.js releases. Every hour this checks npm for a newer *released* version. If there
+# is one: install it, quick-check (TypeScript + WhatsApp unit tests), commit to production-ready
+# and start "API CI/CD", which runs the full test suite and deploys only if everything passes.
+#
+# Only npm releases are taken (not unreleased GitHub commits), so a half-finished change on the
+# library's main branch never reaches the server by itself.
+name: Keep whatsapp-web.js updated
+
+on:
+  schedule:
+    - cron: '17 * * * *' # every hour, at :17
+  workflow_dispatch:
+
+concurrency:
+  group: whatsapp-lib-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write # commit the update
+  actions: write # start the CI/CD run (pushes made with GITHUB_TOKEN don't trigger it)
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: production-ready
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Newer release on npm?
+        id: check
+        run: |
+          LATEST=$(npm view whatsapp-web.js version)
+          CURRENT=$(node -p "require('./package-lock.json').packages['node_modules/whatsapp-web.js'].version")
+          echo "Installed $CURRENT, latest release $LATEST"
+          NEWEST=$(printf '%s\n%s\n' "$CURRENT" "$LATEST" | sort -V | tail -n 1)
+          if [ "$NEWEST" = "$LATEST" ] && [ "$LATEST" != "$CURRENT" ]; then
+            echo "version=$LATEST" >> "$GITHUB_OUTPUT"
+            echo "::notice::whatsapp-web.js $LATEST is out (installed $CURRENT): updating."
+          fi
+
+      - name: Install and quick-check
+        if: steps.check.outputs.version
+        run: |
+          npm ci
+          npm install --save-exact "whatsapp-web.js@${{ steps.check.outputs.version }}"
+          npx prisma generate
+          npx tsc --noEmit -p tsconfig.json
+          npx jest src/modules/sms
+
+      - name: Commit to production-ready
+        if: steps.check.outputs.version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "WhatsApp: update whatsapp-web.js to ${{ steps.check.outputs.version }} (automatic)"
+          git push origin HEAD:production-ready
+
+      - name: Run the full tests and deploy
+        if: steps.check.outputs.version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci-cd.yml --ref production-ready

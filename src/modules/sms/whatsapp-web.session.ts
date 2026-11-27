@@ -32,7 +32,14 @@ export interface WebClient {
     fetchMessages(opts: { limit: number; fromMe?: boolean }): Promise<{ body: string; id?: { _serialized?: string } }[]>;
   }>;
   info?: { wid?: { user?: string } };
+  /** An 8-character code to type on the phone instead of scanning the QR (only while unlinked). */
+  requestPairingCode?(phoneNumber: string, showNotification?: boolean): Promise<string>;
 }
+
+/** How the server shows under Linked devices on the phone, so nobody removes it by mistake. */
+export const LINKED_DEVICE_NAME = 'GD Kites Server (do not remove)';
+/** A pairing code stays valid this long (WhatsApp renews it every 3 minutes). */
+const PAIRING_CODE_MS = 3 * 60_000;
 
 /**
  * WhatsApp through a linked phone (whatsapp-web.js — unofficial).
@@ -102,6 +109,12 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
     await clearStaleChromeLocks(dataPath);
     return new Client({
       authStrategy: new LocalAuth({ dataPath }),
+      // Shown on the phone under Linked devices.
+      deviceName: LINKED_DEVICE_NAME,
+      browserName: 'GD Kites',
+      // WhatsApp Web opened elsewhere with this number pushes the server off; take it back.
+      takeoverOnConflict: true,
+      takeoverTimeoutMs: 10_000,
       puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] },
     }) as unknown as WebClient;
   }
@@ -221,6 +234,8 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
    */
   currentQr() {
     if (this.state !== 'qr') return null;
+    // A pairing code is being typed on the phone: keep this session, never restart it now.
+    if (Date.now() < this.pairingUntil) return this.qr;
     if (Date.now() - this.qrAt > QR_STALE_MS) {
       if (!this.refreshing) {
         this.refreshing = true;
@@ -233,6 +248,22 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
   }
 
   private refreshing = false;
+  /** Until when a pairing code handed out is valid (no QR refresh restarts meanwhile). */
+  private pairingUntil = 0;
+
+  /**
+   * Link with a code instead of the QR: the phone shows "Link with phone number instead" under
+   * Linked devices → Link a device, and the admin types this 8-character code there. Only while
+   * the server is waiting to be linked (a QR is showing).
+   */
+  async pairingCode(phone: string): Promise<string> {
+    const client = this.client;
+    if (!client?.requestPairingCode) throw new Error('Linking with a code is not available.');
+    if (this.state !== 'qr') throw new Error('WhatsApp is not waiting to be linked. Tap "Get a new QR code" first.');
+    const code = await this.guard(client.requestPairingCode(phone, true), 'getting a pairing code');
+    this.pairingUntil = Date.now() + PAIRING_CODE_MS;
+    return code;
+  }
 
   private markReady(how: string) {
     if (this.state === 'ready') return;
