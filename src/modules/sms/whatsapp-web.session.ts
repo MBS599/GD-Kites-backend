@@ -36,8 +36,6 @@ export interface WebClient {
   requestPairingCode?(phoneNumber: string, showNotification?: boolean): Promise<string>;
 }
 
-/** How the server shows under Linked devices on the phone, so nobody removes it by mistake. */
-export const LINKED_DEVICE_NAME = 'GD Kites Server (do not remove)';
 /** A pairing code stays valid this long (WhatsApp renews it every 3 minutes). */
 const PAIRING_CODE_MS = 3 * 60_000;
 
@@ -109,9 +107,6 @@ export class WhatsAppWebSession implements OnModuleInit, OnModuleDestroy {
     await clearStaleChromeLocks(dataPath);
     return new Client({
       authStrategy: new LocalAuth({ dataPath }),
-      // Shown on the phone under Linked devices.
-      deviceName: LINKED_DEVICE_NAME,
-      browserName: 'GD Kites',
       // WhatsApp Web opened elsewhere with this number pushes the server off; take it back.
       takeoverOnConflict: true,
       takeoverTimeoutMs: 10_000,
