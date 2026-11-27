@@ -1,4 +1,5 @@
 import { Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode, Patch, Post } from '@nestjs/common';
+import { IsIn } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { PHONE_TAKEN, phoneInUse } from '../../common/phone-unique';
 import type { OrderStatus } from '@prisma/client';
@@ -39,6 +40,16 @@ export class UpdateProfileDto {
   @MinLength(2)
   businessName?: string | null;
 }
+
+export class ReviewPromptDto {
+  /** shown: the sheet was shown; rated: tapped "Rate us" / "Already rated" (never again); later: closed it. */
+  @IsIn(['shown', 'rated', 'later']) action: 'shown' | 'rated' | 'later';
+}
+
+/** In-app review sheet: shown again only after a delivery this long after the last time. */
+const REVIEW_REMIND_DAYS = 15;
+/** Shown at most this many times in all (the first time + 3 reminders). */
+const REVIEW_MAX_PROMPTS = 4;
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -87,6 +98,43 @@ export class UsersController {
       include: { driverProfile: true },
     });
     return { user: userOut(updated) };
+  }
+
+  /**
+   * Should the app show the "Rate us on Google" sheet now? Every customer once; if they did not
+   * rate, again after a later delivered order (or shop bill), at most every 15 days and 4 times
+   * in all. Never after they tap Rate / Already rated, and never while no review link is set.
+   */
+  @Get('me/review-prompt')
+  async reviewPrompt(@CurrentUser() user: AuthUser) {
+    const s = await this.prisma.appSettings.findUnique({ where: { id: 1 }, select: { googleReviewUrl: true } });
+    const url = s?.googleReviewUrl?.trim() || null;
+    const u = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    let show = !!url && u.role === 'CUSTOMER' && !u.reviewedAt && u.reviewPrompts < REVIEW_MAX_PROMPTS;
+    if (show && u.reviewPrompts > 0) {
+      const last = u.reviewPromptedAt ?? new Date(0);
+      const due = Date.now() - last.getTime() >= REVIEW_REMIND_DAYS * 86_400_000;
+      const deliveredSince = due
+        ? await this.prisma.order.count({ where: { customerId: u.id, status: 'DELIVERED', deliveredAt: { gt: last } } })
+        : 0;
+      show = due && deliveredSince > 0;
+    }
+    return { show, url };
+  }
+
+  @Post('me/review-prompt')
+  @HttpCode(200)
+  async reviewPromptDone(@CurrentUser() user: AuthUser, @Body() dto: ReviewPromptDto) {
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data:
+        dto.action === 'shown'
+          ? { reviewPrompts: { increment: 1 }, reviewPromptedAt: new Date() }
+          : dto.action === 'rated'
+            ? { reviewedAt: new Date() }
+            : { reviewPromptedAt: new Date() },
+    });
+    return { ok: true };
   }
 
   /** The user opened their notifications: everything so far is read. */

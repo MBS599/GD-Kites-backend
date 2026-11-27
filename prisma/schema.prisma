@@ -81,6 +81,11 @@ model User {
   /// When we asked this customer to review GD Kite Center on Google (asked once, after
   /// their first delivered order or shop bill); null = not asked yet.
   reviewAskedAt       DateTime?
+  /// In-app "Rate us on Google" sheet: how often and when it was last shown, and when the
+  /// customer tapped Rate / Already rated (then it never shows again).
+  reviewPrompts       Int             @default(0)
+  reviewPromptedAt    DateTime?
+  reviewedAt          DateTime?
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
   driverProfile       DriverProfile?

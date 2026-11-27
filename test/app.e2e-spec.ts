@@ -2042,6 +2042,47 @@ describe('GD Kite Center API (e2e)', () => {
   });
 
   describe('shop counter', () => {
+    it('in-app review sheet: every customer once, again after a later delivery (15 days on), never after rating', async () => {
+      const link = 'https://share.google/3B2SduHzPbttRgvyn';
+      const me = customer.user.id;
+      const prompt = async () => (await http.get(`${API}/users/me/review-prompt`).set(auth(customer)).expect(200)).body;
+      const reset = { reviewPrompts: 0, reviewPromptedAt: null, reviewedAt: null };
+      await prisma.user.update({ where: { id: me }, data: reset });
+
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ googleReviewUrl: '' }).expect(200);
+      expect((await prompt()).show).toBe(false); // no link: never
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ googleReviewUrl: link }).expect(200);
+      expect(await prompt()).toEqual({ show: true, url: link }); // first time: everyone
+      await http.get(`${API}/users/me/review-prompt`).set(auth(admin)).expect(200).expect((r) => expect(r.body.show).toBe(false));
+
+      await http.post(`${API}/users/me/review-prompt`).set(auth(customer)).send({ action: 'nope' }).expect(400);
+      await http.post(`${API}/users/me/review-prompt`).set(auth(customer)).send({ action: 'shown' }).expect(200);
+      await http.post(`${API}/users/me/review-prompt`).set(auth(customer)).send({ action: 'later' }).expect(200);
+      expect((await prompt()).show).toBe(false); // just shown
+
+      // 16 days later with a delivery since: shown again; without a delivery since: not.
+      const old = new Date(Date.now() - 16 * 86_400_000);
+      await prisma.user.update({ where: { id: me }, data: { reviewPromptedAt: old } });
+      const delivered = await prisma.order.findFirst({ where: { customerId: me, status: 'DELIVERED' } });
+      if (delivered) {
+        await prisma.order.update({ where: { id: delivered.id }, data: { deliveredAt: new Date() } });
+        expect((await prompt()).show).toBe(true);
+      }
+      await prisma.order.updateMany({ where: { customerId: me, status: 'DELIVERED' }, data: { deliveredAt: new Date(old.getTime() - 86_400_000) } });
+      expect((await prompt()).show).toBe(false);
+
+      // Rated: never again.
+      if (delivered) await prisma.order.update({ where: { id: delivered.id }, data: { deliveredAt: new Date() } });
+      await http.post(`${API}/users/me/review-prompt`).set(auth(customer)).send({ action: 'rated' }).expect(200);
+      expect((await prompt()).show).toBe(false);
+
+      // At most 4 times in all.
+      await prisma.user.update({ where: { id: me }, data: { reviewedAt: null, reviewPrompts: 4, reviewPromptedAt: old } });
+      expect((await prompt()).show).toBe(false);
+      await prisma.user.update({ where: { id: me }, data: reset });
+      await http.patch(`${API}/settings`).set(auth(admin)).send({ googleReviewUrl: null }).expect(200);
+    });
+
     it('asks a customer once for a Google review after their first bill, only while a link is set', async () => {
       const catalog = (await http.get(`${API}/shop/catalog`).expect(200)).body.products;
       const bill = (phone: string) =>
