@@ -1574,6 +1574,17 @@ describe('GD Kite Center API (e2e)', () => {
       expect(month.topCustomers.length).toBeGreaterThan(0);
       expect(month.topCustomers[0]).toMatchObject({ id: expect.any(String), name: expect.any(String), orders: expect.any(Number) });
       expect(month.topCustomers[0].sales).toBeGreaterThanOrEqual(month.topCustomers[month.topCustomers.length - 1].sales);
+      // Top areas: delivery areas by sales, highest first (no shop counter), at most five.
+      expect(month.topAreas.length).toBeGreaterThan(0);
+      expect(month.topAreas.length).toBeLessThanOrEqual(5);
+      expect(month.topAreas[0]).toMatchObject({
+        area: expect.any(String),
+        city: expect.any(String),
+        orders: expect.any(Number),
+        customers: expect.any(Number),
+      });
+      expect(month.topAreas.map((a: any) => a.area)).not.toContain('Shop counter');
+      expect(month.topAreas[0].sales).toBeGreaterThanOrEqual(month.topAreas[month.topAreas.length - 1].sales);
       expect(month.customers).toBeGreaterThan(0);
       await http.get(`${API}/admin/dashboard`).set(auth(admin)).query({ from: day(0), to: day(5) }).expect(400);
       await http.get(`${API}/admin/dashboard`).set(auth(admin)).query({ from: '04-10-2026' }).expect(400);
